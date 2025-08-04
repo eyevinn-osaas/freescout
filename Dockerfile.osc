@@ -1,0 +1,6 @@
+FROM tiredofit/freescout:latest
+
+COPY ./osc-entrypoint.sh /usr/local/bin/osc-entrypoint.sh
+RUN chmod +x /usr/local/bin/osc-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/osc-entrypoint.sh"]
