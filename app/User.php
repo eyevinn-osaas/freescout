@@ -69,6 +69,11 @@ class User extends Authenticatable
     const INVITE_STATE_NOT_INVITED = 3;
 
     /**
+     * For how long invitation link is valid.
+     */
+    const INVITE_TTL_DAYS = 7;
+
+    /**
      * Time formats.
      */
     const TIME_FORMAT_12 = 1;
@@ -117,7 +122,7 @@ class User extends Authenticatable
      *
      * @var [type]
      */
-    protected $fillable = ['role', 'status', 'first_name', 'last_name', 'email', 'password', 'timezone', 'photo_url', 'type', 'emails', 'job_title', 'phone', 'time_format', 'locale'];
+    protected $fillable = ['status', 'first_name', 'last_name', 'email', 'password', 'timezone', 'photo_url', 'type', 'emails', 'job_title', 'phone', 'time_format', 'locale'];
 
     protected $casts = [
         'permissions' => 'array',
@@ -126,7 +131,7 @@ class User extends Authenticatable
     public function __construct(array $attributes = array())
     {
         $this->setRawAttributes(array_merge($this->attributes, array(
-            'timezone' => config('app.timezone') ?: User::DEFAULT_TIMEZONE
+            'timezone' => config('app.timezone') ?: User::DEFAULT_TIMEZONE,
         )), true);
         parent::__construct($attributes);
     }
@@ -329,7 +334,8 @@ class User extends Authenticatable
     /**
      * Check to see if the user can manage any mailboxes
      */
-    public function hasManageMailboxAccess() {
+    public function hasManageMailboxAccess()
+    {
         if ($this->isAdmin()) {
             return true;
         } else {
@@ -363,7 +369,8 @@ class User extends Authenticatable
      * Main function to check if user has some exta access permission
      * for a given mailbox.
      */
-    public function hasManageMailboxPermission($mailbox_id, $perm) {
+    public function hasManageMailboxPermission($mailbox_id, $perm)
+    {
         // Experimental feature.
         // This option does not affect admin users.
         if ($perm == Mailbox::ACCESS_PERM_ASSIGNED) {
@@ -391,8 +398,6 @@ class User extends Authenticatable
             }
         }
     }
-
-
 
     /**
      * Generate random password for the user.
@@ -428,7 +433,7 @@ class User extends Authenticatable
      */
     public function url()
     {
-        return route('users.profile', ['id'=>$this->id]);
+        return route('users.profile', ['id' => $this->id]);
     }
 
     /**
@@ -438,7 +443,9 @@ class User extends Authenticatable
      */
     public function urlSetup()
     {
-        return route('user_setup', ['hash' => $this->invite_hash]);
+        $invite_sent_at = \Helper::encrypt(time().'', $this->password);
+
+        return route('user_setup', ['hash' => $this->invite_hash, 'invite_sent_at' => $invite_sent_at]);
     }
 
     /**
@@ -639,7 +646,7 @@ class User extends Authenticatable
     {
         $user_permission_names = [
             self::PERM_DELETE_CONVERSATIONS => __('Users are allowed to delete conversations'),
-            self::PERM_EDIT_CONVERSATIONS   => __('Users are allowed to edit notes/replies'),
+            self::PERM_EDIT_CONVERSATIONS   => __('Users are allowed to edit own notes/replies'),
             self::PERM_EDIT_SAVED_REPLIES   => __('Users are allowed to edit/delete saved replies'),
             self::PERM_EDIT_TAGS            => __('Users are allowed to manage tags'),
             self::PERM_EDIT_CUSTOM_FOLDERS  => __('Users are allowed to manage custom folders'),
@@ -969,7 +976,7 @@ class User extends Authenticatable
     /**
      * Create user.
      */
-    public static function create($data)
+    public static function create($data, $options = [])
     {
         $user = new self();
 
@@ -982,6 +989,7 @@ class User extends Authenticatable
         try {
             $user->save();
         } catch (\Exception $e) {
+            \Helper::logException($e);
             return null;
         }
 
@@ -1011,7 +1019,7 @@ class User extends Authenticatable
         foreach ($fields_strip as $field) {
             if (in_array($field, array_keys($data))) {
                 if ($data[$field] !== null) {
-                    $data[$field] = strip_tags($data[$field]);
+                    $data[$field] = \Helper::stripTags($data[$field]);
                 }
             }
         }
@@ -1025,6 +1033,10 @@ class User extends Authenticatable
                     $this->$key = $value;
                 }
             }
+        }
+        // Role is not fillable.
+        if (!empty($data['role']) && array_key_exists((int)$data['role'], self::$roles)) {
+            $this->role = (int)$data['role'];
         }
 
         \Eventy::action('user.set_data', $this, $data, $replace_data);
@@ -1148,7 +1160,10 @@ class User extends Authenticatable
 
     public function getAuthToken()
     {
-        return md5($this->id.''.$this->created_at.config('app.key'));
+        $expiry = time()+2592000;
+        $hash = hash_hmac('sha256', $this->id.':'.$expiry, config('app.key').$this->password);
+
+        return urlencode(base64_encode($this->id.':'.$expiry.':'.$hash));
     }
 
     public static function findNonDeleted($id, $extended = false)
@@ -1193,6 +1208,23 @@ class User extends Authenticatable
         }
 
         return false;
+    }
+
+    public static function findByAlternateEmail($email)
+    {
+        $email = Email::sanitizeEmail($email);
+
+        $users = self::nonDeleted()
+            ->where('emails', \Helper::sqlLikeOperator(), '%'.$email.'%')
+            ->get();
+
+        foreach ($users as $user) {
+            if ($user->hasEmail($email)) {
+                return $user;
+            }
+        }
+
+        return null;
     }
 
     /**

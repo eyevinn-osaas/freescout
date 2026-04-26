@@ -11,8 +11,8 @@ use Closure;
 use Illuminate\Support\Facades\App;
 use Illuminate\Http\Request;
 
-class HttpsRedirect {
-
+class HttpsRedirect
+{
     /**
      * The current proxy header mappings.
      *
@@ -28,7 +28,7 @@ class HttpsRedirect {
 
     public function handle($request, Closure $next)
     {
-        if (\Helper::isHttps()) {
+        if (\Helper::isHttps() && !\Helper::isConsole()) {
             //$request->setTrustedProxies( [ $request->getClientIp() ], array_keys($this->headers)); 
             //!$request->secure()
             if (!\Helper::isCurrentUrlHttps()) {

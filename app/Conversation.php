@@ -35,6 +35,11 @@ class Conversation extends Model
     const SUBJECT_LENGTH = 80;
 
     /**
+     * Subject max length.
+     */
+    const SUBJECT_MAXLENGTH = 998;
+
+    /**
      * Conversation reply undo timeout in seconds.
      * Value has to be larger than close_after in fsFloatingAlertsInit.
      */
@@ -284,6 +289,7 @@ class Conversation extends Model
 
     /**
      * Cached mailbox.
+     * 
      * @return [type] [description]
      */
     public function mailbox_cached()
@@ -390,11 +396,16 @@ class Conversation extends Model
      *
      * @return Collection
      */
-    public function getThreads($skip = null, $take = null, $types = [])
+    public function getThreads($skip = null, $take = null, $types = [], $states = [Thread::STATE_PUBLISHED])
     {
         $query = $this->threads()
-            ->where('state', Thread::STATE_PUBLISHED)
             ->orderBy('created_at', 'desc');
+
+        if (count($states) == 1 && !empty($states[0])) {
+            $query->where('state', $states[0]);
+        } else {
+            $query->whereIn('state', $states);
+        }
 
         if (!is_null($skip)) {
             $query->skip($skip);
@@ -490,7 +501,7 @@ class Conversation extends Model
             $title .= '<br/>'.User::dateFormat($this->created_at, 'M j, Y H:i');
         } else {
             $person = '';
-            if (!empty(self::$persons[$this->last_reply_from])) {
+            if (!empty(self::$persons[$this->last_reply_from ?? ''])) {
                 $person = __(ucfirst(self::$persons[$this->last_reply_from]));
             }
             $title = __('Last reply by :person', ['person' => $person]);
@@ -622,12 +633,14 @@ class Conversation extends Model
      *
      * @param int $status
      */
-    public function setStatus($status, $user = null)
+    public function setStatus($status, $user = null, $update_folder = true)
     {
         $now = date('Y-m-d H:i:s');
 
         $this->status = $status;
-        $this->updateFolder();
+        if ($update_folder) {
+            $this->updateFolder();
+        }
         $this->user_updated_at = $now;
 
         if ($user && $status == self::STATUS_CLOSED) {
@@ -1268,6 +1281,13 @@ class Conversation extends Model
     {
         $prev_mailbox = $this->mailbox;
 
+        // Make conversation Unassigned if current assignee does not have
+        // access to the target mailbox.
+        // https://github.com/freescout-help-desk/freescout/issues/5333
+        if ($this->user_id && $this->user && !$this->user->can('view', $mailbox)) {
+            $this->changeUser(self::USER_UNASSIGNED, $user, $create_thread = true);
+        }
+
         foreach ($this->folders as $folder) {
             // Process indirect folders.
             if (!in_array($folder->type, Folder::$indirect_types)) {
@@ -1345,6 +1365,11 @@ class Conversation extends Model
      */
     public function mergeConversations($second_conversation, $user)
     {
+        // Do not allow to merge with self.
+        if ($second_conversation->id == $this->id) {
+            return false;
+        }
+
         // Move all threads from old to new conversation.
         foreach ($second_conversation->threads as $thread) {
             $thread->conversation_id = $this->id;
@@ -1728,9 +1753,9 @@ class Conversation extends Model
     {
         $viewers_cache = \Cache::get('conv_view');
         $viewers = [];
-        $first_user_id = null;
         $user_ids = [];
         foreach ($conversations as $conversation) {
+            $first_user_id = null;
             if (!empty($viewers_cache[$conversation->id])) {
                 // Get replying viewers
                 foreach ($viewers_cache[$conversation->id] as $user_id => $viewer) {
@@ -1741,7 +1766,7 @@ class Conversation extends Model
                         $viewers[$conversation->id] = [
                             'user'     => null,
                             'user_id'  => $user_id,
-                            'replying' => true
+                            'replying' => true,
                         ];
                         $user_ids[] = $user_id;
                         break;
@@ -1752,7 +1777,7 @@ class Conversation extends Model
                     $viewers[$conversation->id] = [
                         'user'     => null,
                         'user_id'  => $first_user_id,
-                        'replying' => false
+                        'replying' => false,
                     ];
                     $user_ids[] = $first_user_id;
                 }
@@ -1904,6 +1929,8 @@ class Conversation extends Model
     {
         \Eventy::action('conversations.before_delete_forever', $conversation_ids);
 
+        $folder_ids = [];
+
         //$conversation_ids = $conversations->pluck('id')->toArray();
         for ($i=0; $i < ceil(count($conversation_ids) / \Helper::IN_LIMIT); $i++) { 
 
@@ -1912,6 +1939,20 @@ class Conversation extends Model
             // Delete attachments.
             $thread_ids = Thread::whereIn('conversation_id', $ids)->pluck('id')->toArray();
             Attachment::deleteByThreadIds($thread_ids);
+
+            // Collect folders IDs.
+            $folder_ids = array_merge($folder_ids, ConversationFolder::whereIn('conversation_id', $ids)
+                ->distinct()
+                ->pluck('id')
+                ->toArray()
+            );
+            $folder_ids = array_unique($folder_ids);
+            $folder_ids = array_merge($folder_ids, Conversation::whereIn('id', $ids)
+                ->distinct()
+                ->pluck('folder_id')
+                ->toArray()
+            );
+            $folder_ids = array_unique($folder_ids);
 
             // Observers do not react on this kind of deleting.
 
@@ -1923,7 +1964,21 @@ class Conversation extends Model
 
             // Delete conversations.
             Conversation::whereIn('id', $ids)->delete();
+
+            // Delete links to folders.
             ConversationFolder::whereIn('conversation_id', $ids)->delete();
+        }
+
+        // Update folders counters.
+        for ($i=0; $i < ceil(count($folder_ids) / \Helper::IN_LIMIT); $i++) { 
+
+            $ids = array_slice($folder_ids, $i*\Helper::IN_LIMIT, \Helper::IN_LIMIT);
+
+            // Update counters.
+            $folders = Folder::whereIn('id', $ids)->get();
+            foreach ($folders as $folder) {
+                $folder->updateCounters();
+            }
         }
     }
 
@@ -2079,7 +2134,8 @@ class Conversation extends Model
     //     return self::$email_history_codes[(int)$this->email_history] ?? 'global';
     // }
 
-    public static function getEmailHistoryName($code) {
+    public static function getEmailHistoryName($code)
+    {
         $label = '';
 
         switch ($code) {
@@ -2230,8 +2286,7 @@ class Conversation extends Model
 
         $result = \Eventy::filter('conversations.table_sorting', $result);
 
-        if (
-            !empty($request->sorting['sort_by']) && !empty($request->sorting['order']) &&
+        if (!empty($request->sorting['sort_by']) && !empty($request->sorting['order']) &&
             in_array($request->sorting['sort_by'], ['subject', 'number', 'date']) &&
             in_array($request->sorting['order'], ['asc', 'desc'])
         ) {
@@ -2287,7 +2342,8 @@ class Conversation extends Model
                 $query->where('conversations.subject', $like_op, $like)
                     ->orWhere('conversations.customer_email', $like_op, $like)
                     ->orWhere('conversations.'.self::numberFieldName(), $q_int)
-                    ->orWhere('conversations.id', $q_int)
+                    // https://github.com/freescout-help-desk/freescout/issues/5298
+                    //->orWhere('conversations.id', $q_int)
 					->orWhere('customers.first_name', $like_op, $like)
                     ->orWhere('customers.last_name', $like_op, $like)
                     ->orWhere(\Helper::isPgSql() ? \DB::raw('(customers.first_name || \' \' || customers.last_name)') : \DB::raw('CONCAT(customers.first_name, " ", customers.last_name)'), $like_op, $like)
@@ -2374,7 +2430,7 @@ class Conversation extends Model
         }
 
         if (!self::queryContainsStr($query_sql, '`customers`.`id`')) {
-            $query_conversations->leftJoin('customers', 'conversations.customer_id', '=' ,'customers.id');
+            $query_conversations->leftJoin('customers', 'conversations.customer_id', '=', 'customers.id');
         }
 
         $query_conversations = \Eventy::filter('search.conversations.apply_filters', $query_conversations, $filters, $q);

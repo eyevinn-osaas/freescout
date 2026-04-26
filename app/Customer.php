@@ -652,7 +652,7 @@ class Customer extends Model
             return [[
                 'value' => '',
                 'type' => self::PHONE_TYPE_WORK,
-            ]];
+            ],];
         } else {
             return [];
         }
@@ -776,7 +776,7 @@ class Customer extends Model
             return [[
                 'type' => '',
                 'value' => '',
-            ]];
+            ],];
         } else {
             return [];
         }
@@ -932,6 +932,9 @@ class Customer extends Model
         if (!$email) {
             return null;
         }
+
+        $email = Email::sanitizeLength($email);
+
         $email_obj = Email::where('email', $email)->first();
         if ($email_obj) {
             $customer = $email_obj->customer;
@@ -953,7 +956,7 @@ class Customer extends Model
         } else {
             $customer = new self();
             $email_obj = new Email();
-            $email_obj->email = $email;
+            $email_obj->email = Email::sanitizeLength($email);
 
             $new = true;
         }
@@ -1008,6 +1011,9 @@ class Customer extends Model
         if (!empty($data['background']) && empty($data['notes'])) {
             $data['notes'] = $data['background'];
         }
+
+        // Strip tags.
+        $data = \Helper::stripTagsFromArray($data, $this->fillable);
 
         if ($replace_data) {
             // Replace data.
@@ -1142,7 +1148,7 @@ class Customer extends Model
      */
     public function url()
     {
-        return route('customers.update', ['id'=>$this->id]);
+        return route('customers.update', ['id' => $this->id]);
     }
 
     /**
@@ -1152,7 +1158,7 @@ class Customer extends Model
      */
     public function urlView()
     {
-        return route('customers.conversations', ['id'=>$this->id]);
+        return route('customers.conversations', ['id' => $this->id]);
     }
 
     /**
@@ -1292,6 +1298,10 @@ class Customer extends Model
      */
     public function mergeWith(Customer $customer2)
     {
+        if ($this->id == $customer2->id) {
+            return false;
+        }
+        
         $user = auth()->user();
 
         $customer2->conversations()->update(['customer_id' => $this->id]);
@@ -1341,6 +1351,8 @@ class Customer extends Model
         \Eventy::action('customer.merged', $this, $customer2, $user);
 
         $customer2->delete();
+
+        return true;
     }
 
     public static function mergeTypeValueLists($list1, $list2)
@@ -1426,10 +1438,23 @@ class Customer extends Model
             return $data;
         }
 
-        $name_parts = explode(' ', $name, 2);
-        $data['first_name'] = $name_parts[0];
-        if (!empty($name_parts[1])) {
-            $data['last_name'] = $name_parts[1];
+        if (strstr($name, ',')) {
+            // Smith, John.
+            // https://github.com/freescout-help-desk/freescout/issues/5074
+            $name_parts = explode(',', $name, 2);
+            if (!empty($name_parts[1]) && trim($name_parts[1])) {
+                $data['first_name'] = trim($name_parts[1]);
+                $data['last_name'] = trim($name_parts[0]);
+            } else {
+                $data['first_name'] = trim($name_parts[0]);
+            }
+        } else {
+            // Normal format.
+            $name_parts = explode(' ', $name, 2);
+            $data['first_name'] = $name_parts[0];
+            if (!empty($name_parts[1])) {
+                $data['last_name'] = $name_parts[1];
+            }
         }
 
         return $data;
@@ -1563,8 +1588,40 @@ class Customer extends Model
             $this->channel_id = $channel_id;
             $this->save();
         }
+        $customer_channel = CustomerChannel::where('customer_id', $this->id)
+                ->where('channel', $channel)
+                ->first();
 
-        return CustomerChannel::create($this->id, $channel, $channel_id);
+        if ($customer_channel) {
+            // Update channel_id.
+            if ($customer_channel->channel_id != $channel_id) {
+                try {
+                    $customer_channel->channel_id = $channel_id;
+                    $customer_channel->save();
+                } catch (\Exception $e) {
+                    // Do nothing.
+                }
+                return $customer_channel;
+            }
+        } else {
+            // Create.
+            return CustomerChannel::create($this->id, $channel, $channel_id);
+        }
+    }
+
+    // Each customer can have only one record for specific CHANNEL in CustomerChannel table.
+    public function updateChannelId($channel, $new_channel_id)
+    {
+        if (!$channel || !$new_channel_id) {
+            return;
+        }
+        try {
+            CustomerChannel::where('customer_id', $this->id)
+                ->where('channel', $channel)
+                ->update(['channel_id' => $new_channel_id]);
+        } catch (\Exception $e) {
+            // Do nothing.
+        }
     }
 
     public static function getCustomerByChannel($channel, $channel_id)

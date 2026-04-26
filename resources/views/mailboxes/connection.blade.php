@@ -26,9 +26,9 @@
                     {{ csrf_field() }}
 
                     <div class="descr-block">
-                        {!! __("You can read more about sending emails :%a_begin%here:%a_end%.", ['%a_begin%' => '<a href="'.config('app.freescout_repo').'/wiki/Sending-emails" target="_blank">', '%a_end%' =>'</a>']) !!}
+                        {!! __h("You can read more about sending emails :%a_begin%here:%a_end%.", ['%a_begin%' => '<a href="'.htmlspecialchars(config('app.freescout_repo')).'/wiki/Sending-emails" target="_blank">', '%a_end%' =>'</a>']) !!}
 
-                        {!! __("To send system emails via webmail providers (Gmail, Yahoo, etc) use only SMTP method and make sure that SMTP username is equal to the mailbox email address (:%mailbox_email%), otherwise webmail provider won't send emails.", ['%mailbox_email%' => $mailbox->email]) !!}
+                        {{ __("To send system emails via webmail providers (Gmail, Yahoo, etc) use only SMTP method and make sure that SMTP username is equal to the mailbox email address (:%mailbox_email%), otherwise webmail provider won't send emails.", ['%mailbox_email%' => $mailbox->email]) }}
                     </div>
                     <hr/>
 
@@ -68,7 +68,7 @@
 
                                 @if (strstr($mailbox->out_server ?? '', '.gmail.'))
                                     <div class="form-help">
-                                        {!! __("How to :%link_start%connect Gmail:%link_end% to FreeScout.", ['%link_start%' => '<a href="'.config('app.freescout_repo').'/wiki/Connect-Gmail-to-FreeScout" target="_blank">', '%link_end%' => '</a>']) !!}
+                                        {!! __h("How to :%link_start%connect Gmail:%link_end% to FreeScout.", ['%link_start%' => '<a href="'.htmlspecialchars(config('app.freescout_repo')).'/wiki/Connect-Gmail-to-FreeScout" target="_blank">', '%link_end%' => '</a>']) !!}
                                     </div>
                                 @endif
 
@@ -91,7 +91,7 @@
                             <label for="out_username" class="col-sm-2 control-label">{{ __('Username') }}</label>
 
                             <div class="col-sm-6">
-                                <input id="out_username" type="text" class="form-control input-sized @if ($out_oauth_enabled) disabled @endif" name="out_username" value="{{ old('out_username', $mailbox->out_username) }}" maxlength="100" @if ($mailbox->out_method == App\Mailbox::OUT_METHOD_SMTP) @endif autofocus {{-- This added to prevent autocomplete in Chrome --}}autocomplete="new-password" @if ($out_oauth_enabled) readonly @endif>
+                                <input id="out_username" type="text" class="form-control input-sized @if ($out_oauth_enabled) disabled @endif" name="out_username" value="{{ old('out_username', $mailbox->out_username) }}" maxlength="255" @if ($mailbox->out_method == App\Mailbox::OUT_METHOD_SMTP) @endif autofocus {{-- This added to prevent autocomplete in Chrome --}}autocomplete="new-password" @if ($out_oauth_enabled) readonly @endif>
 
                                 @include('partials/field_error', ['field'=>'out_username'])
                             </div>
@@ -102,27 +102,60 @@
                             <div class="col-sm-6">
                                 <input id="out_password" type="password" class="form-control input-sized @if ($out_oauth_enabled) disabled @endif" name="out_password" value="{{ old('out_password', $mailbox->outPasswordSafe()) }}" maxlength="255" @if ($mailbox->out_method == App\Mailbox::OUT_METHOD_SMTP) @endif autofocus {{-- This added to prevent autocomplete in Chrome --}}autocomplete="new-password" @if ($out_oauth_enabled) readonly @endif>
 
-                                <p class="form-help">
-                                    <small @if ($mailbox->oauthGetParam('provider') == \MailHelper::OAUTH_PROVIDER_MICROSOFT && $out_oauth_enabled) class="text-success" @endif>Microsoft Exchange</small> 
-                                    @if (!$mailbox->oauthEnabled())
-                                        @if ($mailbox->out_username && $mailbox->out_password && !strstr($mailbox->out_username, '@'))
-                                             – <a href="{{ route('mailboxes.oauth', ['id' => $mailbox->id, 'provider' => \MailHelper::OAUTH_PROVIDER_MICROSOFT, 'in_out' => 'out']) }}" target="_blank">{{ __('Connect') }}</a>
+                                @php
+                                    $active_oauth_provider = '';
+                                    if ($out_oauth_enabled) {
+                                        $active_oauth_provider = $mailbox->oauthGetParam('provider');
+                                    }
+                                @endphp
+
+                                {{-- Microsoft Exchange --}}
+                                @if ($active_oauth_provider != \MailHelper::OAUTH_PROVIDER_GOOGLE)
+                                    <p class="form-help">
+                                        <small @if ($mailbox->isOauthProvider(\MailHelper::OAUTH_PROVIDER_MICROSOFT) && $out_oauth_enabled) class="text-success" @endif>Microsoft Exchange</small> 
+                                        @if (!$mailbox->oauthEnabled())
+                                            @if ($mailbox->out_username && $mailbox->out_password && $mailbox->isOutUsernameOauth())
+                                                 – <a href="{{ route('mailboxes.oauth', ['id' => $mailbox->id, 'provider' => \MailHelper::OAUTH_PROVIDER_MICROSOFT, 'in_out' => 'out']) }}" target="_blank">{{ __('Connect') }}</a>
+                                            @endif
+                                        @elseif ($mailbox->isOauthProvider(\MailHelper::OAUTH_PROVIDER_MICROSOFT) && $out_oauth_enabled)
+                                             – <a href="{{ route('mailboxes.oauth_disconnect', ['id' => $mailbox->id, 'provider' => \MailHelper::OAUTH_PROVIDER_MICROSOFT, 'in_out' => 'out', 'token' => csrf_token()]) }}">{{ __('Disconnect') }}</a>
                                         @endif
-                                    @elseif ($mailbox->oauthGetParam('provider') == \MailHelper::OAUTH_PROVIDER_MICROSOFT && $out_oauth_enabled)
-                                         – <a href="{{ route('mailboxes.oauth_disconnect', ['id' => $mailbox->id, 'provider' => \MailHelper::OAUTH_PROVIDER_MICROSOFT, 'in_out' => 'out']) }}">{{ __('Disconnect') }}</a>
-                                    @endif
-                                    <small>(<a href="{{ config('app.freescout_repo') }}/wiki/Connect-FreeScout-to-Microsoft-365-Exchange-via-oAuth" target="_blank">{{ __('Help') }}</a>)</small>
-                                </p>
+                                        <small>(<a href="{{ config('app.freescout_repo') }}/wiki/Connect-FreeScout-to-Microsoft-365-Exchange-via-oAuth" target="_blank">{{ __('Help') }}</a>)</small>
+                                    </p>
+                                @endif
+
+                                {{-- Google Workspace --}}
+                                @if ($active_oauth_provider != \MailHelper::OAUTH_PROVIDER_MICROSOFT)
+                                    <p class="form-help">
+                                        <small @if ($mailbox->isOauthProvider(\MailHelper::OAUTH_PROVIDER_GOOGLE) && $out_oauth_enabled) class="text-success" @endif>Google Workspace</small> 
+                                        @if (!$mailbox->oauthEnabled())
+                                            @if ($mailbox->out_username && $mailbox->out_password && $mailbox->isOutUsernameOauth())
+                                                 – <a href="{{ route('mailboxes.oauth', ['id' => $mailbox->id, 'provider' => \MailHelper::OAUTH_PROVIDER_GOOGLE, 'in_out' => 'out']) }}" target="_blank">{{ __('Connect') }}</a>
+                                            @endif
+                                        @elseif ($mailbox->isOauthProvider(\MailHelper::OAUTH_PROVIDER_GOOGLE) && $out_oauth_enabled)
+                                             – <a href="{{ route('mailboxes.oauth_disconnect', ['id' => $mailbox->id, 'provider' => \MailHelper::OAUTH_PROVIDER_GOOGLE, 'in_out' => 'out', 'token' => csrf_token()]) }}">{{ __('Disconnect') }}</a>
+                                        @endif
+                                        <small>(<a href="{{ config('app.freescout_repo') }}/wiki/Connect-FreeScout-to-Google-Workspace" target="_blank">{{ __('Help') }}</a>)</small>
+                                    </p>
+                                @endif
                             </div>
                         </div>
                         <div class="form-group{{ $errors->has('out_encryption') ? ' has-error' : '' }}">
                             <label for="out_encryption" class="col-sm-2 control-label">{{ __('Encryption') }}</label>
-
+                            @php
+                                $out_encryption = old('out_encryption', $mailbox->out_encryption);
+                                // Set TLS encryption by default.
+                                if ($out_encryption == App\Mailbox::OUT_ENCRYPTION_NONE) {
+                                    if (!$mailbox->outSettingsSaved()) {
+                                        $out_encryption = App\Mailbox::OUT_ENCRYPTION_TLS;
+                                    }
+                                }
+                            @endphp
                             <div class="col-sm-6">
                                 <select id="out_encryption" class="form-control input-sized" name="out_encryption" @if ($mailbox->out_method == App\Mailbox::OUT_METHOD_SMTP) required @endif autofocus data-smtp-required="true">
-                                    <option value="{{ App\Mailbox::OUT_ENCRYPTION_NONE }}" @if (old('out_encryption', $mailbox->out_encryption) == App\Mailbox::OUT_ENCRYPTION_NONE)selected="selected"@endif>{{ __('None') }}</option>
-                                    <option value="{{ App\Mailbox::OUT_ENCRYPTION_SSL }}" @if (old('out_encryption', $mailbox->out_encryption) == App\Mailbox::OUT_ENCRYPTION_SSL)selected="selected"@endif>SSL</option>
-                                    <option value="{{ App\Mailbox::OUT_ENCRYPTION_TLS }}" @if (old('out_encryption', $mailbox->out_encryption) == App\Mailbox::OUT_ENCRYPTION_TLS)selected="selected"@endif>TLS &nbsp;(+StartTLS)</option>
+                                    <option value="{{ App\Mailbox::OUT_ENCRYPTION_NONE }}" @if ($out_encryption == App\Mailbox::OUT_ENCRYPTION_NONE)selected="selected"@endif>{{ __('None') }}</option>
+                                    <option value="{{ App\Mailbox::OUT_ENCRYPTION_SSL }}" @if ($out_encryption == App\Mailbox::OUT_ENCRYPTION_SSL)selected="selected"@endif>SSL</option>
+                                    <option value="{{ App\Mailbox::OUT_ENCRYPTION_TLS }}" @if ($out_encryption == App\Mailbox::OUT_ENCRYPTION_TLS)selected="selected"@endif>TLS &nbsp;(+StartTLS)</option>
                                 </select>
 
                                 @include('partials/field_error', ['field'=>'out_encryption'])
@@ -142,7 +175,7 @@
                                         <button id="send-test-trigger" class="btn btn-default" type="button" data-loading-text="{{ __('Sending') }}…" @if (!$mailbox->isOutActive()) disabled="disabled" @endif>{{ __('Send Test') }}</button>
                                     </span>
                                 </div>
-                                <div class="form-help">{!! __("Make sure to save settings before testing.") !!}</div>
+                                <div class="form-help">{{ __("Make sure to save settings before testing.") }}</div>
                                 <pre class="alert alert-warning hidden" id="send_test_log"></pre>
                             </div>
                         </div>

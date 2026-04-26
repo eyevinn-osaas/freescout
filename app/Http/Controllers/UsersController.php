@@ -85,26 +85,30 @@ class UsersController extends Controller
                         ->withInput();
         }
 
+        $password = '';
+        if (empty($request->send_invite)) {
+            // Set password from request.
+            $password = $request->password;
+        } else {
+            // Set some random password before sending invite.
+            $password = User::generateRandomPassword();
+        }
+
         $data = [
             'first_name' => $request->first_name,
             'last_name' => $request->last_name,
             'email' => $request->email,
+            'password' => $password,
         ];
 
-        $user = new User();
-
-        $user->fill($data);
+        $user = User::create($data);
 
         if (!$auth_user->can('changeRole', $user)) {
             $user->role = User::ROLE_USER;
+        } elseif (array_key_exists($request->role, User::$roles)) {
+            $user->role = $request->role;
         }
-        if (empty($request->send_invite)) {
-            // Set password from request
-            $user->password = Hash::make($request->password);
-        } else {
-            // Set some random password before sending invite
-            $user->password = Hash::make($user->generateRandomPassword());
-        }
+
         // Set system timezone.
         $user->timezone = config('app.timezone') ?: User::DEFAULT_TIMEZONE;
         $user = \Eventy::filter('user.create_save', $user, $request);
@@ -148,7 +152,7 @@ class UsersController extends Controller
     public function getUsersForSidebar($except_id)
     {
         if (auth()->user()->isAdmin()) {
-            return User::sortUsers(User::nonDeleted()->get());/*->except($except_id)*/;
+            return User::sortUsers(User::nonDeleted()->get()); // ->except($except_id);
         } else {
             return [];
         }
@@ -304,7 +308,7 @@ class UsersController extends Controller
             abort(404);
         }
 
-        $mailboxes = Mailbox::all();
+        $mailboxes = Mailbox::all()->sortBy('name');
 
         $users = $this->getUsersForSidebar($id);
 
@@ -360,7 +364,7 @@ class UsersController extends Controller
     public function notifications($id)
     {
         $user = User::findOrFail($id);
-        $this->authorize('update', $user);
+        $this->authorize('updateNotifications', $user);
 
         if ($user->isDeleted()) {
             abort(404);
@@ -393,7 +397,7 @@ class UsersController extends Controller
     public function notificationsSave($id, Request $request)
     {
         $user = User::findOrFail($id);
-        $this->authorize('update', $user);
+        $this->authorize('updateNotifications', $user);
 
         Subscription::saveFromArray($request->subscriptions, $user->id);
 
@@ -547,7 +551,7 @@ class UsersController extends Controller
 
                     $user->deleteUser($auth_user, $request->assign_user);
 
-                    \Session::flash('flash_success_floating', __('User deleted').': '.$user->getFullName());
+                    \Session::flash('flash_success_floating', __('User deleted').': '.htmlspecialchars($user->getFullName()));
 
                     $response['status'] = 'success';
                 }

@@ -129,11 +129,32 @@ class WebklexTest extends FixtureWebklexMessage {
         self::assertSame("------3f0eb27c226a6efc44713e1b8f40befd34d8d3c9199e2ad04dab9839cbbd3524", $message->header->getBoundary());
     }
 
+    /**
+     * This test also makes sure that 
+     * headers of multipart message are parsed properly
+     * when there is a ";" at the end:
+     * 
+     * Content-Type: text/html; charset="UTF-8";
+     */
     public function testRegularEmail() {
         $message = $this->getFixture("message-3.eml");
 
         self::assertSame("1", (string)$message->getSubject());
         self::assertSame("1\n", $message->getTextBody());
         self::assertSame('<div dir="ltr"><div>1</div></div>', $message->getHtmlBody());
+    }
+
+    // https://github.com/freescout-help-desk/freescout/issues/5292
+    public function testNullBytesInBody() {
+        $message = $this->getFixture("message-4-null-bytes.eml");
+
+        self::assertStringEndsWith("</html>", $message->getHtmlBody());
+    }
+
+    // https://github.com/freescout-help-desk/freescout/issues/5356
+    public function testIso2022JpCharset() {
+        $message = $this->getFixture("message-5-iso-2022-jp.eml");
+
+        self::assertStringEndsWith("※ アマゾン 配送部", $message->getTextBody());
     }
 }

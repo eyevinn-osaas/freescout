@@ -28,6 +28,7 @@ Thumbs.db
 /Modules/**/.git
 /public/modules
 /public/docs
+/public/.dh-diag
 /storage/.ignore_locales
 /storage/.installed
 /tools
@@ -35,3 +36,4 @@ Thumbs.db
 /resources/lang/module.*
 .phpunit.result.cache
 /.phpunit.cache
+.env.testing

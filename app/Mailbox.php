@@ -3,6 +3,7 @@
 namespace App;
 
 use App\Email;
+use App\Thread;
 use App\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
@@ -670,6 +671,22 @@ class Mailbox extends Model
     }
 
     /**
+     * Determines if Fetching settings for the mailbox have been saved by admin.
+     */
+    public function inSettingsSaved()
+    {
+        return ($this->attributes['in_password'] !== null);
+    }
+
+    /**
+     * Determines if Sending settings for the mailbox have been saved by admin.
+     */
+    public function outSettingsSaved()
+    {
+        return ($this->attributes['out_password'] !== null);
+    }
+
+    /**
      * Get pivot table parameters for the user.
      */
     public function getUserSettings($user_id)
@@ -684,7 +701,8 @@ class Mailbox extends Model
     }
 
     /**
-     * Create dummy object with default parameters
+     * Create dummy object with default parameters.
+     * 
      * @return [type] [description]
      */
     public static function getDummySettings()
@@ -930,6 +948,15 @@ class Mailbox extends Model
 
     public function setMetaParam($param, $value, $save = false)
     {
+        // Encrypt some values.
+        if ($param == 'oauth' && is_array($value)) {
+            if (!empty($value['a_token'])) {
+                $value['a_token'] = \Helper::encrypt($value['a_token']);
+            }
+            if (!empty($value['r_token'])) {
+                $value['r_token'] = \Helper::encrypt($value['r_token']);
+            }
+        }
         $meta = $this->meta;
         $meta[$param] = $value;
         $this->meta = $meta;
@@ -974,20 +1001,84 @@ class Mailbox extends Model
 
     public function oauthGetParam($param)
     {
-        return $this->meta['oauth'][$param] ?? '';
+        $value = $this->meta['oauth'][$param] ?? '';
+
+        // Decrypt some values.
+        if (in_array($param, ['a_token', 'r_token'])) {
+            $value = \Helper::decrypt($value);
+        }
+
+        return $value;
     }
 
     public function inOauthEnabled()
     {
         return $this->oauthEnabled() 
-            && $this->in_username !== null && !strstr($this->in_username, '@');
+            && $this->in_username !== null 
+            && $this->isInUsernameOauth();
     }
 
     public function outOauthEnabled()
     {
         return $this->oauthEnabled() 
-            && $this->out_username !== null && !strstr($this->out_username, '@')
-            && $this->out_server !== null && trim($this->out_server) == \MailHelper::OAUTH_MICROSOFT_SMTP;
+            && $this->out_username !== null
+            && $this->isOutUsernameOauth()
+            && $this->out_server !== null 
+            && $this->isOutServerOauth();
+    }
+
+    // For oAuth Username may have the following format:
+    // test@example.org:123-456-789
+    public function getInOauthUsername()
+    {
+        $username = preg_replace("#:.*#", '', $this->in_username ?? '');
+        
+        if (strstr($username, '@')) {
+            return $username;
+        } else {
+            return $this->email;
+        }
+    }
+
+    public function getInOauthClientId()
+    {
+        return preg_replace("#.*:#", '', $this->in_username ?? '');
+    }
+
+    public function getOutOauthUsername()
+    {
+        $username = preg_replace("#:.*#", '', $this->out_username ?? '');
+
+        if (strstr($username, '@')) {
+            return $username;
+        } else {
+            return $this->email;
+        }
+    }
+
+    public function getOutOauthClientId()
+    {
+        return preg_replace("#.*:#", '', $this->out_username ?? '');
+    }
+
+    public function isInUsernameOauth()
+    {
+        return (!strstr($this->in_username, '@') || preg_match("#.*@.*:.*#", $this->in_username));
+    }
+
+    public function isOutUsernameOauth()
+    {
+        return (!strstr($this->out_username, '@') || preg_match("#.*@.*:.*#", $this->out_username));
+    }
+
+    public function isOauthProvider($provider)
+    {
+        return ($this->oauthGetParam('provider') == $provider);
+    }
+
+    public function isOutServerOauth()
+    {
+        return in_array(trim($this->out_server), [\MailHelper::OAUTH_MICROSOFT_SMTP, \MailHelper::OAUTH_GOOGLE_SMTP]);
     }
 
     public function setEmailAttribute($value)
@@ -995,5 +1086,24 @@ class Mailbox extends Model
         if ($value) {
             $this->attributes['email'] = Email::sanitizeEmail($value);
         }
+    }
+
+    public function deleteMailbox()
+    {
+        // Remove threads and conversations.
+        $conversation_ids = $this->conversations()->pluck('id')->toArray();
+        
+        // for ($i=0; $i < ceil(count($conversation_ids) / \Helper::IN_LIMIT); $i++) { 
+        //     $slice_ids = array_slice($conversation_ids, $i*\Helper::IN_LIMIT, \Helper::IN_LIMIT);
+        //     Thread::whereIn('conversation_id', $slice_ids)->delete();
+        // }
+        // $this->conversations()->delete();
+        Conversation::deleteConversationsForever($conversation_ids);
+
+        $this->users()->sync([]);
+        $this->folders()->delete();
+        // Maybe remove notifications on events in this mailbox?
+
+        $this->delete();
     }
 }

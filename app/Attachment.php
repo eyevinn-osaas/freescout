@@ -19,9 +19,16 @@ class Attachment extends Model
 
     const DIRECTORY = 'attachment';
 
-    CONST DISK = 'private';
+    const DISK = 'private';
 
-    CONST MIME_TYPE_MAX_LENGTH = 127;
+    const MIME_TYPE_MAX_LENGTH = 127;
+
+    // For backward compatibility.
+    const TOKEN_TYPE_LEGACY = 1;
+    // For backward compatibility.
+    const TOKEN_TYPE_MD5    = 2;
+    // Current way.
+    const TOKEN_TYPE_SHA256 = 3;
 
     // https://github.com/Webklex/laravel-imap/blob/master/src/IMAP/Attachment.php
     public static $types = [
@@ -37,7 +44,7 @@ class Attachment extends Model
     ];
 
     public static $type_extensions = [
-        self::TYPE_VIDEO => ['flv', 'mp4', 'm3u8', 'ts', '3gp', 'mov', 'avi', 'wmv']
+        self::TYPE_VIDEO => ['flv', 'mp4', 'm3u8', 'ts', '3gp', 'mov', 'avi', 'wmv'],
     ];
 
     public $timestamps = false;
@@ -53,7 +60,7 @@ class Attachment extends Model
     /**
      * Save attachment to file and database.
      */
-    public static function create($file_name, $mime_type, $type, $content, $uploaded_file, $embedded = false, $thread_id = null, $user_id = null)
+    public static function create($file_name, $mime_type, $type, $content, $uploaded_file, $embedded = false, $thread_id = null, $user_id = null, $upload_mode = \Helper::UPLOAD_MODE_DEFAULT)
     {
         if (!$content && !$uploaded_file) {
             return false;
@@ -70,7 +77,7 @@ class Attachment extends Model
         $orig_extension = pathinfo($file_name, PATHINFO_EXTENSION);
 
         // Add underscore to the extension if file has restricted extension.
-        $file_name = \Helper::sanitizeUploadedFileName($file_name, $uploaded_file, $content);
+        $file_name = \Helper::sanitizeUploadedFileName($file_name, $uploaded_file, $content, $mime_type, $upload_mode);
 
         // Replace some symbols in file name.
         // Gmail can not load image if it contains spaces.
@@ -121,6 +128,7 @@ class Attachment extends Model
         $attachment->mime_type = $mime_type;
         $attachment->type = $type;
         $attachment->embedded = $embedded;
+        $attachment->token_type = self::TOKEN_TYPE_SHA256;
         $attachment->save();
 
         $file_info = self::saveFileToDisk($attachment, $file_name, $content, $uploaded_file);
@@ -271,16 +279,20 @@ class Attachment extends Model
      */
     public function getToken()
     {
-        // \Hash::make() may contain . and / symbols which may cause problems.
-        return md5(config('app.key').$this->id.$this->size);
+        if ($this->token_type == self::TOKEN_TYPE_MD5) {
+            // Backward compatibility.
+            // \Hash::make() may contain . and / symbols which may cause problems.
+            return md5(config('app.key').$this->id.$this->size);
+        } else {
+            return hash_hmac('sha256', $this->id.$this->size.$this->file_name, config('app.key'));
+        }
     }
 
     /**
      * Outputs the current Attachment as download
      */
-    public function download($view = false)
+    public function download($view = false, $headers = [])
     {
-        $headers = [];
         // #533
         //return $this->getDisk()->download($this->getStorageFilePath(), \Str::ascii($this->file_name));
         if ($view) {
@@ -295,7 +307,8 @@ class Attachment extends Model
         return $this->getDisk()->download($this->getStorageFilePath(), $file_name, $headers);
     }
 
-    private function getDisk() {
+    private function getDisk()
+    {
         return Storage::disk(self::DISK);
     }
 

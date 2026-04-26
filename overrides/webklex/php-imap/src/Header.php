@@ -119,6 +119,16 @@ class Header {
     }
 
     /**
+     * Check if a specific attribute exists
+     * @param string $name
+     *
+     * @return bool
+     */
+    public function has($name): bool {
+        return isset($this->attributes[$name]);
+    }
+
+    /**
      * Set a specific attribute
      * @param string $name
      * @param array|mixed $value
@@ -570,7 +580,8 @@ class Header {
                     }
                 }
             } elseif ($decoder === 'iconv') {
-                $value = iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, "UTF-8");
+                //$value = iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, "UTF-8");
+                $value = \Helper::iconvMimeDecode($value);
             } elseif ($is_utf8_base) {
                 $value = mb_decode_mimeheader($value);
             }
@@ -606,19 +617,19 @@ class Header {
     private function findPriority() {
         if (($priority = $this->get("x_priority")) === null) return;
         switch ((int)"$priority") {
-            case IMAP::MESSAGE_PRIORITY_HIGHEST;
+            case IMAP::MESSAGE_PRIORITY_HIGHEST:
                 $priority = IMAP::MESSAGE_PRIORITY_HIGHEST;
                 break;
-            case IMAP::MESSAGE_PRIORITY_HIGH;
+            case IMAP::MESSAGE_PRIORITY_HIGH:
                 $priority = IMAP::MESSAGE_PRIORITY_HIGH;
                 break;
-            case IMAP::MESSAGE_PRIORITY_NORMAL;
+            case IMAP::MESSAGE_PRIORITY_NORMAL:
                 $priority = IMAP::MESSAGE_PRIORITY_NORMAL;
                 break;
-            case IMAP::MESSAGE_PRIORITY_LOW;
+            case IMAP::MESSAGE_PRIORITY_LOW:
                 $priority = IMAP::MESSAGE_PRIORITY_LOW;
                 break;
-            case IMAP::MESSAGE_PRIORITY_LOWEST;
+            case IMAP::MESSAGE_PRIORITY_LOWEST:
                 $priority = IMAP::MESSAGE_PRIORITY_LOWEST;
                 break;
             default:
@@ -811,6 +822,11 @@ class Header {
                 if (str_contains($value, ";") && str_contains($value, "=")) {
                     $_attributes = $this->read_attribute($value);
                     foreach($_attributes as $_key => $_value) {
+                        // Without this the following will not be parsed properly with ";" on the end:
+                        // Content-Type: text/html; charset="UTF-8";
+                        if ($_key === "") {
+                            continue;
+                        }
                         if ($_value === "") {
                             // Remove existing value.
                             if (isset($this->attributes[$key])) {

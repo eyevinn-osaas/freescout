@@ -87,7 +87,7 @@
         <thead>
         <tr>
             <th class="conv-current">&nbsp;</th>
-            @if (empty($no_checkboxes))<th class="conv-cb"><input type="checkbox" class="toggle-all magic-checkbox" id="toggle-all"><label for="toggle-all"></label></th>@endif
+            @if (empty($no_checkboxes))<th class="conv-cb"><input type="checkbox" class="toggle-all magic-checkbox" id="toggle-all"><label for="toggle-all"><span class="sr-only">{{ __('Select All Conversations') }}</span></label></th>@endif
             @if (empty($no_customer))
                 <th class="conv-customer">
                     <span>{{ __("Customer") }}</span>
@@ -140,18 +140,19 @@
                             @endif</td>@else<td class="conv-current"></td>@endif
                     @if (empty($no_checkboxes))
                         <td class="conv-cb">
-                            <input type="checkbox" class="conv-checkbox magic-checkbox" id="cb-{{ $conversation->id }}" name="cb_{{ $conversation->id }}" value="{{ $conversation->id }}"><label for="cb-{{ $conversation->id }}"></label>
+                            <input type="checkbox" class="conv-checkbox magic-checkbox" id="cb-{{ $conversation->id }}" name="cb_{{ $conversation->id }}" value="{{ $conversation->id }}"><label for="cb-{{ $conversation->id }}"><span class="sr-only">{{ __('Select Conversation') }}: {{ $conversation->getSubject() }}</span></label>
                         </td>
                     @endif
                     @if (empty($no_customer))
                         <td class="conv-customer">
-                            <a href="{{ $conversation->url() }}" @if (!empty($params['target_blank'])) target="_blank" @endif>
+                            <a href="{{ $conversation->url() }}" @if (!empty($params['target_blank'])) target="_blank" @endif title="{{ $conversation->customer_email }}">
                                 @if ($conversation->customer_id && $conversation->customer){{ $conversation->customer->getFullName(true)}}@endif&nbsp;@if ($conversation->threads_count > 1)<span class="conv-counter">{{ $conversation->threads_count }}</span>@endif
                                 @if ($conversation->user_id)
                                     <small class="conv-owner-mobile text-help">
                                         {{ ($assignee = $conversation->user) ? $assignee->getFullName() : '' }} <small class="glyphicon glyphicon-user"></small>
                                     </small>
                                 @endif
+                                <span class="conv-email">{{ $conversation->customer_email }}</span>
                             </a>
                         </td>
                     @else
@@ -218,7 +219,7 @@
                 <tr>
                     <td class="conv-totals" colspan="{{ $col_counter-3 }}">
                         @if ($conversations->total())
-                            {!! __(':count conversations', ['count' => '<strong>'.$conversations->total().'</strong>']) !!}&nbsp;|&nbsp; 
+                            {!! __safe_raw_html(':count conversations', ['count' => '<strong>'.$conversations->total().'</strong>']) !!}&nbsp;|&nbsp; 
                         @endif
                         @if (isset($folder->active_count) && !$folder->isIndirect())
                             <strong>{{ $folder->getActiveCount() }}</strong> {{ __('active') }}&nbsp;|&nbsp; 

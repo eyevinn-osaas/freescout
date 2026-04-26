@@ -19,11 +19,20 @@ class Mail
 
     /**
      * Message-ID prefixes for outgoing emails.
+     * Message-IDs should not match Spam Assasin patters.
+     * https://github.com/freescout-help-desk/freescout/issues/5245
      */
-    const MESSAGE_ID_PREFIX_NOTIFICATION = 'notify';
-    const MESSAGE_ID_PREFIX_NOTIFICATION_IN_REPLY = 'conversation';
-    const MESSAGE_ID_PREFIX_REPLY_TO_CUSTOMER = 'reply';
-    const MESSAGE_ID_PREFIX_AUTO_REPLY = 'autoreply';
+    const MESSAGE_ID_PREFIX_NOTIFICATION = 'FS_notify';
+    const MESSAGE_ID_PREFIX_NOTIFICATION_IN_REPLY = 'FS_conversation';
+    const MESSAGE_ID_PREFIX_REPLY_TO_CUSTOMER = 'FS_reply';
+    const MESSAGE_ID_PREFIX_AUTO_REPLY = 'FS_autoreply';
+
+    public static $all_message_id_prefixes = [
+        self::MESSAGE_ID_PREFIX_NOTIFICATION,
+        self::MESSAGE_ID_PREFIX_NOTIFICATION_IN_REPLY,
+        self::MESSAGE_ID_PREFIX_REPLY_TO_CUSTOMER,
+        self::MESSAGE_ID_PREFIX_AUTO_REPLY,
+    ];
 
     /**
      * Mail drivers.
@@ -50,6 +59,10 @@ class Mail
 
     const OAUTH_PROVIDER_MICROSOFT = 'ms';
     const OAUTH_MICROSOFT_SMTP = 'smtp.office365.com';
+
+    // Google Workspace
+    const OAUTH_PROVIDER_GOOGLE = 'gw';
+    const OAUTH_GOOGLE_SMTP = 'smtp.gmail.com';
 
     /**
      * If reply is not extracted properly from the incoming email, add here a new separator.
@@ -129,6 +142,11 @@ class Mail
     public static $smtp_mime_message = '';
 
     /**
+     * Indicates that DATA command and mail content has been sent to the mail server.
+     */
+    public static $smtp_data_sent = false;
+
+    /**
      * Configure mail sending parameters.
      *
      * @param App\Mailbox $mailbox
@@ -145,13 +163,17 @@ class Mail
             if ($oauth) {
                 if ((strtotime($mailbox->oauthGetParam('issued_on')) + (int)$mailbox->oauthGetParam('expires_in')) < time()) {
                     // Try to get an access token (using the authorization code grant)
-                    $token_data = \MailHelper::oauthGetAccessToken(\MailHelper::OAUTH_PROVIDER_MICROSOFT, [
-                        'client_id' => $mailbox->out_username,
+                    $token_data = \MailHelper::oauthGetAccessToken($mailbox->oauthGetParam('provider'), [
+                        'client_id' => $mailbox->getOutOauthClientId(),
                         'client_secret' => $mailbox->out_password,
                         'refresh_token' => $mailbox->oauthGetParam('r_token'),
                     ]);
 
                     if (!empty($token_data['a_token'])) {
+                        // In Google Workspace new refresh token is not returned after refreshing the token.
+                        if (empty($token_data['r_token'])) {
+                            $token_data['r_token'] = $mailbox->oauthGetParam('r_token');
+                        }
                         $mailbox->setMetaParam('oauth', $token_data, true);
                     } elseif (!empty($token_data['error'])) {
                         $error_message = 'Error occurred refreshing oAuth Access Token: '.$token_data['error'];
@@ -174,9 +196,10 @@ class Mail
                 \Config::set('mail.port', $mailbox->out_port);
                 if ($oauth) {
                     \Config::set('mail.auth_mode', 'XOAUTH2');
-                    \Config::set('mail.username', $mailbox->email);
+                    \Config::set('mail.username', $mailbox->getOutOauthUsername());
                     \Config::set('mail.password', $mailbox->oauthGetParam('a_token'));
                 } else {
+                    \Config::set('mail.auth_mode', '');
                     if (!$mailbox->out_username) {
                         \Config::set('mail.username', null);
                         \Config::set('mail.password', null);
@@ -307,7 +330,7 @@ class Mail
         );
 
         // Add fallback values to the $vars array, if present.
-        foreach($matches['var'] as $i => $var) {
+        foreach ($matches['var'] as $i => $var) {
             $merge_code   = "{%{$var}%}";
             $full_match   = $matches[0][$i];
             $has_fallback = false !== strpos($full_match, ',fallback=');
@@ -722,7 +745,7 @@ class Mail
         if (function_exists('imap_utf8')) {
             return imap_utf8($mime_encoded_text);
         } else {
-            return iconv_mime_decode($mime_encoded_text, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, "UTF-8");
+            return \Helper::iconvMimeDecode($mime_encoded_text);
         }
     }
 
@@ -784,7 +807,7 @@ class Mail
                 'port'          => $mailbox->in_port,
                 'encryption'    => $mailbox->getInEncryptionName(),
                 'validate_cert' => $mailbox->in_validate_cert,
-                'username'      => $mailbox->email,
+                'username'      => $mailbox->getInOauthUsername(),
                 'password'      => $mailbox->oauthGetParam('a_token'),
                 'protocol'      => $mailbox->getInProtocolName(),
                 'authentication' => 'oauth',
@@ -816,21 +839,27 @@ class Mail
         if ($oauth) {
             if ((strtotime($mailbox->oauthGetParam('issued_on')) + (int)$mailbox->oauthGetParam('expires_in')) < time()) {
                 // Try to get an access token (using the authorization code grant)
-                $token_data = \MailHelper::oauthGetAccessToken(\MailHelper::OAUTH_PROVIDER_MICROSOFT, [
-                    'client_id' => $mailbox->in_username,
+                $token_data = \MailHelper::oauthGetAccessToken($mailbox->oauthGetParam('provider'), [
+                    'client_id' => $mailbox->getInOauthClientId(),
                     'client_secret' => $mailbox->in_password,
                     'refresh_token' => $mailbox->oauthGetParam('r_token'),
                 ]);
 
                 if (!empty($token_data['a_token'])) {
+                    // In Google Workspace new refresh token is not returned after refreshing the token.
+                    if (empty($token_data['r_token'])) {
+                        $token_data['r_token'] = $mailbox->oauthGetParam('r_token');
+                    }
                     $mailbox->setMetaParam('oauth', $token_data, true);
                 } elseif (!empty($token_data['error'])) {
                     $error_message = 'Error occurred refreshing oAuth Access Token: '.$token_data['error'];
-                    \Helper::log(\App\ActivityLog::NAME_EMAILS_FETCHING, 
+                    \Helper::log(
+                        \App\ActivityLog::NAME_EMAILS_FETCHING, 
                         \App\ActivityLog::DESCRIPTION_EMAILS_FETCHING_ERROR, [
-                        'error'   => $error_message,
-                        'mailbox' => $mailbox->name,
-                    ]);
+                            'error'   => $error_message,
+                            'mailbox' => $mailbox->name,
+                        ]
+                    );
                     throw new \Exception($error_message, 1);
                 }
             }
@@ -854,6 +883,11 @@ class Mail
         }
 
         return 'fs-'.$hash.'@'.preg_replace("/.*@/", '', $email_address);
+    }
+
+    public static function isGeneratedMessageId($message_id)
+    {
+        return preg_match("#^fs\-[a-z0-9]+@#", $message_id ?? '');
     }
 
     /**
@@ -895,9 +929,9 @@ class Mail
 
                 // Limit using date to speed up the search.
                 if ($message_date) {
-                   $query->since($message_date->subDays(7));
-                   // Here we should add 14 days, as previous line subtracts 7 days.
-                   $query->before($message_date->addDays(14));
+                    $query->since($message_date->subDays(7));
+                    // Here we should add 14 days, as previous line subtracts 7 days.
+                    $query->before($message_date->addDays(14));
                 }
 
                 if ($no_charset) {
@@ -917,8 +951,8 @@ class Mail
                     //$query = $folder->query()->text('<'.$message_id.'>')->leaveUnread()->limit(1)->setCharset(null);
                     $query = $folder->query()->whereMessageId('"<'.$search_message_id.'>"')->leaveUnread()->limit(1)->setCharset(null);
                     if ($message_date) {
-                       $query->since($message_date->subDays(7));
-                       $query->before($message_date->addDays(14));
+                        $query->since($message_date->subDays(7));
+                        $query->before($message_date->addDays(14));
                     }
                     $messages = $query->get();
                     $no_charset = true;
@@ -941,6 +975,7 @@ class Mail
         $args = [];
 
         switch ($provider_code) {
+
             case self::OAUTH_PROVIDER_MICROSOFT:
                 // https://docs.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth
                 $args = [
@@ -948,9 +983,23 @@ class Mail
                     'response_type' => 'code',
                     'approval_prompt' => 'auto',
                     'redirect_uri' => route('mailboxes.oauth_callback'),
+                    //'state' => // passed in $params
                 ];
                 $args = array_merge($args, $params);
                 $url = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?'.http_build_query($args);
+                break;
+
+            case self::OAUTH_PROVIDER_GOOGLE:
+                $args = [
+                    'scope' => 'https://mail.google.com/',
+                    'response_type' => 'code',
+                    'prompt' => 'consent', // Without this there will be no refresh_token in response
+                    'redirect_uri' => route('mailboxes.oauth_callback'),
+                    'access_type' => 'offline', // Without this there will be no refresh_token in response
+                    //'state' => // passed in $params
+                ];
+                $args = array_merge($args, $params);
+                $url = 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query($args);
                 break;
         }
 
@@ -963,6 +1012,7 @@ class Mail
         $post_params = [];
 
         switch ($provider_code) {
+
             case self::OAUTH_PROVIDER_MICROSOFT:
                 $post_params = [
                     'scope' => 'offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send',
@@ -1025,20 +1075,103 @@ class Mail
                         $token_data['error'] = 'Response code: '.curl_getinfo($curl, CURLINFO_HTTP_CODE);
                     }
                 }
-                curl_close($curl);
+                
+                if (PHP_VERSION_ID < 80000) {
+                    curl_close($curl);
+                }
+                break;
 
+            case self::OAUTH_PROVIDER_GOOGLE:
+                $post_params = [
+                    //'scope' => 'https://mail.google.com/', // Just in case
+                    "grant_type" => "authorization_code",
+                    'redirect_uri' => route('mailboxes.oauth_callback'),
+                ];
+
+                $post_params = array_merge($post_params, $params);
+
+                // Refreshing Access Token.
+                if (!empty($post_params['refresh_token'])) {
+                    $post_params['grant_type'] = 'refresh_token';
+                }
+                
+                $full_url = "https://oauth2.googleapis.com/token";
+
+                $curl = curl_init($full_url);
+
+                curl_setopt($curl, CURLOPT_POST, true);
+                //curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+                curl_setopt($curl, CURLOPT_POSTFIELDS, $post_params);
+                curl_setopt($curl, CURLOPT_HTTPHEADER, array("application/x-www-form-urlencoded"));
+                curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+                \Helper::setCurlDefaultOptions($curl);
+                curl_setopt($curl, CURLOPT_TIMEOUT, 180);
+
+                $response = curl_exec($curl);
+
+                if ($response) {
+                    $result = json_decode($response, true);
+                    // {
+                    //   "access_token": "...",
+                    //   "refresh_token": "...",
+                    //   "expires_in": 3598,
+                    //   "scope": "https://mail.google.com/",
+                    //   "token_type": "Bearer"
+                    // }
+                    if (!empty($result['access_token'])) {
+                        $token_data['provider'] = self::OAUTH_PROVIDER_GOOGLE;
+                        $token_data['a_token'] = $result['access_token'];
+                        if ($post_params['grant_type'] != 'refresh_token') {
+                            $token_data['r_token'] = $result['refresh_token'];
+                        }
+                        //$token_data['id_token'] = $result['id_token'];
+                        $token_data['issued_on'] = now()->toDateTimeString();
+                        $token_data['expires_in'] = $result['expires_in'];
+                    } elseif ($response) {
+                        $token_data['error'] = $response;
+                    } else {
+                        $token_data['error'] = 'Response code: '.curl_getinfo($curl, CURLINFO_HTTP_CODE);
+                    }
+                }
+                if (PHP_VERSION_ID < 80000) {
+                    curl_close($curl);
+                }
                 break;
         }
 
         return $token_data;
     }
 
-    public static function oauthDisconnect($provider_code, $redirect_uri)
+    public static function oauthDisconnect($provider_code, $redirect_uri, $mailbox)
     {
         switch ($provider_code) {
+
             case self::OAUTH_PROVIDER_MICROSOFT:
                 return redirect()->away('https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri='.urlencode($redirect_uri));
-            break;
+
+            case self::OAUTH_PROVIDER_GOOGLE:
+                // This does not work.
+                // $post_params = [
+                //     'token' => $mailbox->oauthGetParam('a_token')
+                // ];
+
+                // $full_url = "https://oauth2.googleapis.com/revoke";
+                // $curl = curl_init($full_url);
+
+                // curl_setopt($curl, CURLOPT_POST, true);
+                // curl_setopt($curl, CURLOPT_POSTFIELDS, $post_params);
+                // curl_setopt($curl, CURLOPT_HTTPHEADER, array("application/x-www-form-urlencoded"));
+                // curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+                // \Helper::setCurlDefaultOptions($curl);
+                // curl_setopt($curl, CURLOPT_TIMEOUT, 180);
+
+                // $response = curl_exec($curl);
+                // $http_status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+
+                // if ($http_status != 200) {
+                //     \Log::error('[Google Workspace OAuth] Error revoking token on logout: HTTPS Status Code - '.$http_status.'; '.json_encode($response));
+                // }
+                return redirect()->away($redirect_uri);
         }
     }
 
@@ -1071,7 +1204,7 @@ class Mail
     public static function getImapFolder($client, $folder_name)
     {
         // https://github.com/freescout-helpdesk/freescout/issues/3502
-        $folder_name = mb_convert_encoding($folder_name, "UTF7-IMAP","UTF-8");
+        $folder_name = mb_convert_encoding($folder_name, "UTF7-IMAP", "UTF-8");
 
         if (method_exists($client, 'getFolderByPath')) {
             return $client->getFolderByPath($folder_name);
@@ -1117,7 +1250,7 @@ class Mail
         // Only one type of encoding should be used.
         preg_match_all("/(=\?[^\?]+\?[BQ]\?)([^\?]+)(\?=)/i", $subject, $m);
         $encodings = $m[1] ?? [];
-        array_walk($encodings, function($value) {
+        array_walk($encodings, function ($value) {
             $value = strtolower($value);
         });
         $one_encoding = count(array_unique($encodings)) == 1;
@@ -1167,7 +1300,7 @@ class Mail
 
         // iconv_mime_decode() can't decode:
         // =?iso-2022-jp?B?IBskQiFaSEcyPDpuQC4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
-        $subject_decoded = iconv_mime_decode($subject, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, "UTF-8");
+        $subject_decoded = \Helper::iconvMimeDecode($subject);
 
         // Sometimes iconv_mime_decode() can't decode some parts of the subject:
         // =?iso-2022-jp?B?IBskQiFaSEcyPDpuQC4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
@@ -1191,7 +1324,8 @@ class Mail
         return $subject_decoded;
     }
 
-    public static function isNotYetFullyDecoded($subject_decoded) {
+    public static function isNotYetFullyDecoded($subject_decoded)
+    {
         // https://stackoverflow.com/questions/15276191/why-does-a-diamond-with-a-questionmark-in-it-appear-in-my-html
         $invalid_utf_symbols = ['�'];
 
@@ -1200,7 +1334,8 @@ class Mail
             || \Str::contains($subject_decoded, $invalid_utf_symbols);
     }
 
-    public static function getHashedReplySeparator($message_id) {
+    public static function getHashedReplySeparator($message_id)
+    {
         $separator = \MailHelper::REPLY_SEPARATOR_HTML;
 
         if ($message_id) {
@@ -1211,14 +1346,16 @@ class Mail
     }
 
     // Sanitize status message - remove SMTP username and password.
-    public static function sanitizeSmtpStatusMessage($status_message) {
+    public static function sanitizeSmtpStatusMessage($status_message)
+    {
         $status_message = preg_replace('#(username ")[^"]+(")#', '$1***$2', $status_message ?? '');
         $status_message = preg_replace("#(Swift_Transport_Esmtp_Auth_LoginAuthenticator\->authenticate\(Object\(Swift_SmtpTransport\), ')[^\']+(', ')[^\']+('\))#", '$1***$2***$3', $status_message ?? '');
 
         return $status_message;
     }
 
-    public static function parseEml($content, $mailbox) {
+    public static function parseEml($content, $mailbox)
+    {
         if (!str_contains($content, "\r\n")){
             $content = str_replace("\n", "\r\n", $content);
         }
@@ -1253,6 +1390,11 @@ class Mail
             $string = str_ireplace('=?'.$from.'?', '=?'.$into.'?', $string);
         }
         return $string;
+    }
+
+    public static function isFsMessageId($message_id)
+    {
+        return preg_match('/^('.implode('|', self::$all_message_id_prefixes).')/i', $message_id);
     }
 
     // public static function oauthGetProvider($provider_code, $params)

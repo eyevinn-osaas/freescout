@@ -115,7 +115,7 @@
         <tbody>
             @foreach ($php_extensions as $extension_name => $extension_status)
                 <tr>
-                    <th>{{ $extension_name }}@if ($extension_name == 'intl' && !$extension_status) {{ __('(optional)') }}@endif</th>
+                    <th>{{ $extension_name }}@if (!$extension_status && in_array(strtolower($extension_name), ['intl', 'imap'])) {{ __('(optional)') }}@endif</th>
                     <td class="table-main-col">
                         @if ($extension_status)
                             <strong class="text-success">OK</strong>
@@ -151,7 +151,7 @@
     @action('system.status.after_functions')
 
     <h3 id="permissions">{{ __('Permissions') }}</h3>
-    {!! __('These folders must be writable by web server user (:user).', ['user' => '<strong>'.(function_exists('get_current_user') ? get_current_user() : '').'</strong>']) !!} {{ __('Recommended permissions') }}: <strong>775</strong>
+    {!! __h('These folders must be writable by web server user (:user).', ['user' => '<strong>'.(function_exists('get_current_user') ? htmlspecialchars(get_current_user()) : '').'</strong>']) !!} {{ __('Recommended permissions') }}: <strong>775</strong>
     <table class="table table-dark-header table-bordered table-responsive table-narrow">
         <tbody>
             @foreach ($permissions as $perm_path => $perm)
@@ -160,12 +160,16 @@
                     <td class="table-main-col">
                         @if ($perm_path == 'storage/framework/cache/data/')
                             @if ($non_writable_cache_file)
-                                <strong class="text-danger">{{ __('Non-writable files found') }}</strong>
-                                <br/>
-                                <span class="text-danger">{{ $non_writable_cache_file }}</span>
-                                <br/><br/>
-                                {{ __('Run the following command') }} (<a href="{{ config('app.freescout_repo') }}/wiki/Installation-Guide#6-configuring-web-server" target="_blank">{{ __('read more') }}</a>):<br/>
-                                <code>sudo chown -R www-data:www-data {{ base_path() }}</code>
+                                @if (strstr($non_writable_cache_file, 'shell_exec()'))
+                                    <span class="text-danger">{{ $non_writable_cache_file }}</span>
+                                @else
+                                    <strong class="text-danger">{{ __('Non-writable files found') }}</strong>
+                                    <br/>
+                                    <span class="text-danger">{{ $non_writable_cache_file }}</span>
+                                    <br/><br/>
+                                    {{ __('Run the following command') }} (<a href="{{ config('app.freescout_repo') }}/wiki/Installation-Guide#6-configuring-web-server" target="_blank">{{ __('read more') }}</a>):<br/>
+                                    <code>sudo chown -R www-data:www-data {{ base_path() }}</code>
+                                @endif
                             @elseif (!$perm['status'])
                                 <strong class="text-danger">{{ __('Not writable') }} @if ($perm['value'])({{ $perm['value'] }})@endif</strong>
                             @else
@@ -222,11 +226,11 @@
 
     <h3 id="cron" class="margin-top-40">Cron Commands</h3>
     <p>
-        {!! __('Make sure that you have the following line in your crontab:') !!}<br/>
+        {{ __('Make sure that you have the following line in your crontab:') }}<br/>
         <code>* * * * * php {{ base_path() }}/artisan schedule:run &gt;&gt; /dev/null 2&gt;&amp;1</code>
         <br/>
-        {!! __('Alternatively cron job can be executed by requesting the following URL every minute (this method is not recommended as some features may not work as expected, use it at your own risk)') !!}:<br/>
-        <a href="{{ route('system.cron', ['hash' => \Helper::getWebCronHash()]) }}" target="_blank">{{ route('system.cron', ['hash' => \Helper::getWebCronHash()]) }}</a>
+        {{ __('Alternatively cron job can be executed by requesting the following URL every minute (this method is not recommended as some features may not work as expected, use it at your own risk)') }}:<br/>
+        <pre><a href="{{ route('system.cron', ['hash' => \Helper::getWebCronHash()]) }}" target="_blank">{{ route('system.cron', ['hash' => \Helper::getWebCronHash()]) }}</a></pre>
     </p>
     <table class="table table-dark-header table-bordered table-responsive">
         <tbody>

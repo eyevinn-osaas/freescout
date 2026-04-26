@@ -29,11 +29,8 @@ class SecureController extends Controller
     public function dashboard()
     {
         $user = auth()->user();
-        if (!$user->isAdmin()) {
-            $mailboxes = $user->mailboxesCanView();
-        } else {
-            $mailboxes = $user->mailboxesCanViewWithSettings();
-        }
+
+        $mailboxes = $user->mailboxesCanViewWithSettings();
 
         // Sort by name.
         $mailboxes = \Eventy::filter('dashboard.mailboxes', $mailboxes->sortBy('name'));
@@ -200,7 +197,7 @@ class SecureController extends Controller
     /**
      * Upload files and images.
      */
-    public function upload(Request $request, $allowed_exts = [])
+    public function upload(Request $request)
     {
         // 'jpg','gif','png'
         $response = [
@@ -220,7 +217,7 @@ class SecureController extends Controller
 
         if (!$response['msg']) {
 
-            $upload = Helper::uploadFile($request->file, $allowed_exts);
+            $upload = Helper::uploadFile($request->file);
             $filename = basename($upload);
 
             if ($upload) {

@@ -54,11 +54,15 @@ class SystemController extends Controller
         $non_writable_cache_file = '';
         if (function_exists('shell_exec')) {
             $non_writable_cache_file = \Helper::shellExec('find '.base_path('storage/framework/cache/data/').' -type f | xargs -I {} sh -c \'[ ! -w "{}" ] && echo {}\' 2>&1 | head -n 1');
-            $non_writable_cache_file = trim($non_writable_cache_file ?? '');
-            // Leave only one line (in case head -n 1 does not work)
-            $non_writable_cache_file = preg_replace("#[\r\n].+#m", '', $non_writable_cache_file);
-            if (!strstr($non_writable_cache_file, base_path('storage/framework/cache/data/'))) {
-                $non_writable_cache_file = '';
+            if ($non_writable_cache_file === false) {
+                $non_writable_cache_file = 'Could not execute command via shell_exec()';
+            } else {
+                $non_writable_cache_file = trim($non_writable_cache_file ?? '');
+                // Leave only one line (in case head -n 1 does not work)
+                $non_writable_cache_file = preg_replace("#[\r\n].+#m", '', $non_writable_cache_file);
+                if (!strstr($non_writable_cache_file, base_path('storage/framework/cache/data/'))) {
+                    $non_writable_cache_file = '';
+                }
             }
         }
         
@@ -87,7 +91,7 @@ class SystemController extends Controller
         // Commands
         $commands_list = [
             'freescout:fetch-emails' => 'freescout:fetch-emails',
-            \Helper::getWorkerIdentifier() => 'queue:work'
+            \Helper::getWorkerIdentifier() => 'queue:work',
         ];
         foreach ($commands_list as $command_identifier => $command_name) {
             $status_texts = [];
@@ -97,19 +101,29 @@ class SystemController extends Controller
                 $running_commands = 0;
 
                 try {
-                    $processes = preg_split("/[\r\n]/", \Helper::shellExec("ps auxww | grep '{$command_identifier}'"));
-                    $pids = [];
-                    foreach ($processes as $process) {
-                        $process = trim($process);
-                        preg_match("/^[\S]+\s+([\d]+)\s+/", $process, $m);
-                        if (empty($m)) {
-                            // Another format (used in Docker image).
-                            // 1713 nginx     0:00 /usr/bin/php82...
-                            preg_match("/^([\d]+)\s+[\S]+\s+/", $process, $m);
-                        }
-                        if (!preg_match("/(sh \-c|grep )/", $process) && !empty($m[1])) {
-                            $running_commands++;
-                            $pids[] = $m[1];
+                    $ps_output = \Helper::shellExec("ps auxww | grep '{$command_identifier}'");
+
+                    if ($ps_output === false) {
+                        $commands[] = [
+                            'name'        => $command_name,
+                            'status'      => 'error',
+                            'status_text' => __h('Could not execute command via shell_exec()'),
+                        ];
+                    } else {
+                        $processes = preg_split("/[\r\n]/", $ps_output);
+                        $pids = [];
+                        foreach ($processes as $process) {
+                            $process = trim($process);
+                            preg_match("/^[\S]+\s+([\d]+)\s+/", $process, $m);
+                            if (empty($m)) {
+                                // Another format (used in Docker image).
+                                // 1713 nginx     0:00 /usr/bin/php82...
+                                preg_match("/^([\d]+)\s+[\S]+\s+/", $process, $m);
+                            }
+                            if (!preg_match("/(sh \-c|grep )/", $process) && !empty($m[1])) {
+                                $running_commands++;
+                                $pids[] = $m[1];
+                            }
                         }
                     }
                 } catch (\Exception $e) {
@@ -119,7 +133,7 @@ class SystemController extends Controller
                     $commands[] = [
                         'name'        => $command_name,
                         'status'      => 'success',
-                        'status_text' => __('Running'),
+                        'status_text' => __h('Running'),
                     ];
                     continue;
                 } elseif ($running_commands > 1) {
@@ -129,14 +143,14 @@ class SystemController extends Controller
                         $commands[] = [
                             'name'        => $command_name,
                             'status'      => 'error',
-                            'status_text' => __(':number commands were running at the same time. Commands have been restarted', ['number' => $running_commands]),
+                            'status_text' => __h(':number commands were running at the same time. Commands have been restarted', ['number' => htmlspecialchars($running_commands)]),
                         ];
                     } else {
                         unset($pids[0]);
                         $commands[] = [
                             'name'        => $command_name,
                             'status'      => 'error',
-                            'status_text' => __(':number commands are running at the same time. Please stop extra commands by executing the following console command:', ['number' => $running_commands]).' kill '.implode(' | kill ', $pids),
+                            'status_text' => __h(':number commands are running at the same time. Please stop extra commands by executing the following console command:', ['number' => htmlspecialchars($running_commands)]).' kill '.implode(' | kill ', $pids),
                         ];
                     }
                     continue;
@@ -151,7 +165,7 @@ class SystemController extends Controller
                 $date = Carbon::createFromTimestamp($last_run);
                 $date_text = User::dateFormat($date);
             }
-            $status_texts[] = __('Last run:').' '.$date_text;
+            $status_texts[] = __h('Last run:').' '.htmlspecialchars($date_text);
 
             $date_text = '?';
             $last_successful_run = Option::get($option_name.'_last_successful_run');
@@ -159,7 +173,7 @@ class SystemController extends Controller
                 $date_ = Carbon::createFromTimestamp($last_successful_run);
                 $date_text = User::dateFormat($date);
             }
-            $status_texts[] = __('Last successful run:').' '.$date_text;
+            $status_texts[] = __h('Last successful run:').' '.htmlspecialchars($date_text);
 
             $status = 'error';
             if ($last_successful_run && $last_run && (int) $last_successful_run >= (int) $last_run) {
@@ -169,7 +183,7 @@ class SystemController extends Controller
 
             // If queue:work is not running, clear cache to let it start if something is wrong with the mutex
             if ($command_name == 'queue:work' && !$last_successful_run) {
-                $status_texts[] = __('Try to :%a_start%clear cache:%a_end% to force command to start.', ['%a_start%' => '<a href="'.route('system.tools').'" target="_blank">', '%a_end%' => '</a>']);
+                $status_texts[] = __h('Try to :%a_start%clear cache:%a_end% to force command to start.', ['%a_start%' => '<a href="'.route('system.tools').'" target="_blank">', '%a_end%' => '</a>']);
                 // This sometimes makes Status page open as non logged in user.
                 //\Artisan::call('freescout:clear-cache', ['--doNotGenerateVars' => true]);
             }
@@ -385,7 +399,12 @@ class SystemController extends Controller
         \Artisan::call('schedule:run', [], $outputLog);
         $output = $outputLog->fetch();
 
-        return response($output, 200)->header('Content-Type', 'text/plain');
+        preg_match_all("#'artisan'\s+([^\s>]+)#", $output ?? '', $m);
+
+        $commands = $m[1] ?? [];
+        $result = count($commands)." commands executed:\r\n".(count($commands) ? '- ' : '').implode("\r\n- ", $commands);
+
+        return response($result, 200)->header('Content-Type', 'text/plain');
     }
 
     /**
@@ -404,7 +423,7 @@ class SystemController extends Controller
                 $payload = json_decode($job->payload, true);
 
                 if (!empty($payload['data']['command'])) {
-                    $html .= '<pre>'.\Helper::stripDangerousTags(print_r(unserialize($payload['data']['command']), 1)).'</pre>';
+                    $html .= '<pre>'.\Helper::stripDangerousTags(print_r(unserialize($payload['data']['command'], ['allowed_classes' => false]), 1)).'</pre>';
                 }
                 
                 $html .= '<pre>'.\Helper::stripDangerousTags($job->exception).'</pre>';

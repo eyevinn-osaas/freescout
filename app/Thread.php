@@ -316,6 +316,15 @@ class Thread extends Model
         // Cut out "collapse" class as it hides elements.
         $body = preg_replace("/(<[^<>\r\n]+class=([\"'][^\"']* |[\"']))(collapse|hidden)([\"' ])/", '$1$4', $body) ?: $body;
 
+        // Take care of MSO-comments.
+        // https://github.com/freescout-help-desk/freescout/issues/5068
+        // Step 1: Completely remove the MSO-specific blocks.
+        // The 's' flag allows '.' to match newlines, and 'i' makes it case-insensitive.
+        $body = preg_replace('/<!--\[if mso\]>.*?<!\[endif\]-->/is', '', $body);
+        // Step 2: Unwrap the standard HTML from the "not mso" comments.
+        // This reveals the standard <a> tag for the purifier.
+        $body = preg_replace('/<!--\[if !mso\]><!--\s*-->(.*?)<!--\s*<!\[endif\]-->/is', '$1', $body);
+
         // Remove only the <!--[if !mso]><!--> and <!--<![endif]--> around the elements.
         // https://github.com/freescout-helpdesk/freescout/pull/3865#issuecomment-1990758149
         $body = preg_replace('/<!\-\-\[if [^>]+\]><!\-\->(.*?)<![ ]+\-\-<!\[endif\]\-\->/s', '$1', $body);
@@ -346,7 +355,7 @@ class Thread extends Model
         // Add target="_blank" to links.
         $pattern = '/<a(.*?)?href=[\'"]?[\'"]?(.*?)?>/i';
 
-        $body = preg_replace_callback($pattern, function($m){
+        $body = preg_replace_callback($pattern, function ($m) {
             $tpl = array_shift($m);
             $href = isset($m[1]) ? $m[1] : null;
 
@@ -359,7 +368,7 @@ class Thread extends Model
                 return $tpl;
             }
 
-            return preg_replace_callback('/href=/i', function($m2){
+            return preg_replace_callback('/href=/i', function ($m2) {
                 return sprintf('target="_blank" %s', array_shift($m2));
             }, $tpl);
 
@@ -1115,7 +1124,8 @@ class Thread extends Model
                     $uploaded_file,
                     $embedded = false,
                     $thread->id,
-                    $user_id ?? null
+                    $user_id ?? null,
+                    $data['attachments_upload_mode'] ?? \Helper::UPLOAD_MODE_DEFAULT,
                 );
 
                 if ($attachment) {
@@ -1503,7 +1513,8 @@ class Thread extends Model
     {
         \Helper::setPcreBacktrackLimit();
 
-        $body = preg_replace_callback("#(<img[^<>]+src=[\"'])data:image/([^;]+);base64,([^\"']+)([\"'])#",
+        $body = preg_replace_callback(
+            "#(<img[^<>]+src=[\"'])data:image/([^;]+);base64,([^\"']+)([\"'])#",
             function ($match) {
                 $attachment = null;
                 $data = base64_decode($match[3]);

@@ -331,7 +331,7 @@
     "Get license key": "Obține cheia de licență",
     "Go to": "Du-te la",
     "HTTPS protocol is required for the browser push notifications to work.": "Protocolul HTTPS este necesar pentru ca notificările push ale browserului să funcționeze.",
-    "Headers": "Anteturi",
+    "Email Headers": "Anteturi",
     "Hello :user_name": "Bună :user_name",
     "Help": "Ajutor",
     "Hi :user, an account has been created for you at :app_url": "Bună :user, un cont a fost creat pentru tine la :app_url",
@@ -555,7 +555,6 @@
     "Queued and failed jobs are cleaned automatically once in a while. No need to worry or delete them manually.": "Sarcinile aflate în coadă și cele eșuate sunt șterse automat din când în când. Nu este nevoie să vă faceți griji sau să le ștergeți manual.",
     "Re-send invite email": "Trimite din nou e-mailul de invitație",
     "Received a new conversation": "A primit o nouă conversație",
-    "Receiving Emails": "Primirea e-mailurilor",
     "Receiving emails need to be configured for the mailbox in order to fetch emails from your support email address": "Primirea e-mailurilor trebuie configurată pentru căsuța poștală pentru a putea prelua e-mailurile de la adresa dvs. de e-mail de asistență.",
     "Recent": "Recent",
     "Recipient clicked a link in the message": "Destinatarul a dat clic pe un link din mesaj",
@@ -749,7 +748,7 @@
     "Username": "Nume utilizator",
     "Users": "Utilizatori",
     "Users are allowed to delete conversations": "Utilizatorii pot șterge conversațiile",
-    "Users are allowed to edit notes\/replies": "Utilizatorii pot edita note\/răspunsuri",
+    "Users are allowed to edit own notes\/replies": "Utilizatorii pot edita note\/răspunsuri",
     "Users are allowed to edit\/delete saved replies": "Utilizatorii pot edita\/șterge răspunsurile salvate",
     "Users are allowed to manage custom folders": "Utilizatorii pot gestiona folderele personalizate",
     "Users are allowed to manage tags": "Utilizatorii pot gestiona etichetele",
@@ -808,6 +807,6 @@
     "or Enter Mailbox Email": "sau Introduceți adresa de e-mail a căsuței poștale",
     "read more": "citește mai mult",
     "via": "prin",
-    "you": "tu",
-    "yourself": "tu însuți"
+    "you": "Tu",
+    "yourself": "Tu"
 }

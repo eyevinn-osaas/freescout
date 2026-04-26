@@ -23,6 +23,7 @@ class SendReplyToCustomer implements ShouldQueue
 
     public $threads;
 
+    // Recipient.
     public $customer;
 
     private $failures = [];
@@ -51,6 +52,7 @@ class SendReplyToCustomer implements ShouldQueue
     {
         $this->conversation = $conversation;
         $this->threads = $threads;
+        // Recipient.
         $this->customer = $customer;
     }
 
@@ -233,7 +235,12 @@ class SendReplyToCustomer implements ShouldQueue
         $this->message_id = $this->last_thread->getMessageId($mailbox);
         $headers['Message-ID'] = $this->message_id;
 
-        $this->customer_email = $this->conversation->customer_email;
+        // https://github.com/freescout-help-desk/freescout/issues/5121
+        if ($this->customer->id == $this->conversation->customer_id) {
+            $this->customer_email = $this->conversation->customer_email;
+        } else {
+            $this->customer_email = $this->last_thread->getToArray()[0] ?: $this->conversation->customer_email;
+        }
 
         // For phone conversations we may need to get customer email.
         // https://github.com/freescout-helpdesk/freescout/issues/3270
@@ -247,7 +254,9 @@ class SendReplyToCustomer implements ShouldQueue
         // Try to get customer by email
         if (!$this->customer) {
             $this->customer = Customer::getByEmail($this->customer_email);
-            return;
+            if (!$this->customer) {
+                return;
+            }
         }
 
         $to_array = $mailbox->removeMailboxEmailsFromList($this->last_thread->getToArray());
@@ -471,7 +480,7 @@ class SendReplyToCustomer implements ShouldQueue
 
                 try {
                     // https://github.com/freescout-helpdesk/freescout/issues/3502
-                    $imap_sent_folder = mb_convert_encoding($imap_sent_folder, "UTF7-IMAP","UTF-8");
+                    $imap_sent_folder = mb_convert_encoding($imap_sent_folder, "UTF7-IMAP", "UTF-8");
 
                     // https://github.com/Webklex/php-imap/issues/380
                     if (method_exists($client, 'getFolderByPath')) {

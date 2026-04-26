@@ -113,6 +113,17 @@ class CustomersController extends Controller
         foreach ($new_emails as $new_email) {
             $email = Email::where('email', $new_email)->first();
             if ($email && $email->customer) {
+                // Prevent pulling in an out-of-scope customer by attaching one
+                // of that customer's emails to the current profile.
+                if ($email->customer_id !== $customer->id) {
+                    if (!$this->checkLimitVisibility($email->customer, true)) {
+                        $validator->errors()->add('email', __('The specified email belongs to a customer from an inaccessible mailbox.'));
+                        return redirect()->route('customers.update', ['id' => $id])
+                                    ->withErrors($validator)
+                                    ->withInput();
+                    }
+                }
+
                 // If customer whose email is removed does not have first name and other emails
                 // we have to create first name for this customer
                 if (!$email->customer->first_name && count($email->customer->emails) == 1) {
@@ -206,22 +217,19 @@ class CustomersController extends Controller
         return redirect()->route('customers.update', ['id' => $id]);
     }
 
-    public function checkLimitVisibility($customer)
+    public function checkLimitVisibility($customer, $return_result = false)
     {
         $user = auth()->user();
-        $limited_visibility = config('app.limit_user_customer_visibility') && !$user->isAdmin();
-
-        if ($limited_visibility) {
-            $mailbox_ids = $user->mailboxesIdsCanView();
-            
-            $accesible = Conversation::where('customer_id', $customer->id)
-                ->whereIn('conversations.mailbox_id', $mailbox_ids)
-                ->exists();
-
-            if (!$accesible) {
+        
+        if (!$user->can('view', $customer)) {
+            if (!$return_result) {
                 \Helper::denyAccess();
+            } else {
+                return false;
             }
         }
+
+        return true;
     }
 
     /**
@@ -264,6 +272,8 @@ class CustomersController extends Controller
     {
         $customer = Customer::findOrFail($id);
 
+        $this->checkLimitVisibility($customer);
+
         $query = $customer->conversations()
             ->where('customer_id', $customer->id)
             ->whereIn('mailbox_id', auth()->user()->mailboxesIdsCanView())
@@ -305,7 +315,12 @@ class CustomersController extends Controller
 
         $select_list = ['customers.id', 'first_name', 'last_name'];
         if ($join_emails) {
-            $select_list[] = 'emails.email';
+            if ($limited_visibility) {
+                // https://github.com/freescout-help-desk/freescout/issues/5032
+                $select_list[] = \DB::raw('MAX(emails.email)');
+            } else {
+                $select_list[] = 'emails.email';
+            }
         }
         if ($request->show_fields == 'phone') {
             $select_list[] = 'phones';
@@ -439,15 +454,25 @@ class CustomersController extends Controller
                 $validator = Validator::make($request->all(), $validator_config);
 
                 if ($validator->fails()) {
-                    foreach ($validator->errors()->getMessages()as $errors) {
+                    foreach ($validator->errors()->getMessages() as $errors) {
                         foreach ($errors as $field => $message) {
                             $response['msg'] .= $message.' ';
                         }
                     }
                 }
 
+                if (!$response['msg'] && $limited_visibility) {
+                    $existing_email = Email::where('email', $request->email)->first();
+
+                    if ($existing_email
+                        && $existing_email->customer
+                        && !$user->can('view', $existing_email->customer)
+                    ) {
+                        $response['msg'] .= __('The specified email belongs to a customer from an inaccessible mailbox.');
+                    }
+                }
+
                 if (!$response['msg']) {
-                   
                     $customer = Customer::create($request->email, $request->all());
                     if ($customer) {
                         $response['email']  = $request->email;
@@ -484,6 +509,8 @@ class CustomersController extends Controller
     {
         $customer = Customer::findOrFail($id);
 
+        $this->checkLimitVisibility($customer);
+
         // $customers = Customer::where('id', '!=', $id)
         //     ->orderBy('first_name')
         //     ->orderBy('last_name')
@@ -498,12 +525,17 @@ class CustomersController extends Controller
     public function mergeSave(Request $request, $id)
     {
         $request->validate([
-            'customer2_id' => 'required|exists:customers,id',
+            'customer2_id' => 'required|exists:customers,id|not_in:'.$id,
             //'keep_attributes' => 'array'
+        ], [], [
+            'customer2_id' => __('Merge With'),
         ]);
 
         $customer = Customer::findOrFail($id);
-        $customer2 = Customer::find($request->customer2_id);
+        $customer2 = Customer::findOrFail($request->customer2_id);
+
+        $this->checkLimitVisibility($customer);
+        $this->checkLimitVisibility($customer2);
 
         // Ensure customers are different
         if ($id === $customer2->id) {

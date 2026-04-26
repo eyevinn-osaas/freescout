@@ -134,6 +134,30 @@ class Module extends Model
         $module->save();
     }
 
+    /**
+     * Automatically encrypt license key.
+     */
+    public function setLicenseAttribute($value)
+    {
+        if ($value != '') {
+            $this->attributes['license'] = \Helper::encrypt($value);
+        } else {
+            $this->attributes['license'] = '';
+        }
+    }
+
+    /**
+     * Automatically decrypt license key.
+     */
+    public function getLicenseAttribute($value)
+    {
+        if (!$value) {
+            return '';
+        }
+
+        return \Helper::decrypt($value);
+    }
+
     public static function normalizeAlias($alias)
     {
         return trim(strtolower($alias));
@@ -241,7 +265,7 @@ class Module extends Model
         // Add (Third-Party).
         if (\App\Module::isOfficial($module_data['authorUrl']) 
             && $module_data['author'] != 'FreeScout'
-            && mb_substr(trim($module_data['name']), -1)  != ']'
+            && mb_substr(trim($module_data['name']), -1) != ']'
         ) {
             $module_data['name'] = $module_data['name'].' ['.__('Third-Party').']';
         }

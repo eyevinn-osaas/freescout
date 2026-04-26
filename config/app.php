@@ -18,7 +18,7 @@ return [
     | or any other location as required by the application or its packages.
     */
 
-    'version' => '1.8.190',
+    'version' => '1.8.218',
 
     /*
     |--------------------------------------------------------------------------
@@ -98,8 +98,8 @@ return [
     */
 
     'locale'          => env('APP_LOCALE', 'en'),
-    'locales'         => ['en', 'ar', 'zh-CN', 'hr', 'cs', 'da', 'nl', 'fi', 'fr', 'de', 'hu', 'it', 'ja', 'kz', 'ko', 'no', 'fa', 'pl', 'pt-PT', 'pt-BR', 'ro', 'ru', 'es', 'sk', 'sv', 'tr', 'uk'],
-    'locales_rtl'     => ['ar', 'fa'],
+    'locales'         => ['en', 'ar', 'zh-CN', 'zh-TW', 'hr', 'cs', 'da', 'nl', 'fi', 'fr', 'de', 'he', 'hu', 'it', 'ja', 'kz', 'ko', 'no', 'fa', 'pl', 'pt-PT', 'pt-BR', 'ro', 'ru', 'es', 'sk', 'sl', 'sv', 'tr', 'uk'],
+    'locales_rtl'     => ['ar', 'fa', 'he'],
     'default_locale'  => 'en',
 
     /*
@@ -165,7 +165,7 @@ return [
     | FreeScout API
     |-------------------------------------------------------------------------
     */
-    'freescout_api' => 'https://freescout.net/wp-json/',
+    'freescout_api' => 'https://api.freescout.net/wp-json/',
     'freescout_alt_api' => 'https://cdn.freescout.net/wp-json/',
 
     /*
@@ -188,7 +188,7 @@ return [
     | Checks for new jobs every --sleep seconds.
     | If --tries is set and job fails it is being processed right away without any delay.
     | --delay parameter does not work to set delays between retry attempts.
-    | --timeout parameter sets job timeout and is used to avoid queue:work freezing.
+    | --timeout parameter sets job timeout in seconds and is used to avoid queue:work freezing.
     |
     | Jobs sending emails are retried manually in handle().
     | Number of retries is set in each job class.
@@ -276,6 +276,24 @@ return [
     // If HTML file is renamed into .txt for example it will be shown by the browser as HTML.
     // Regular expressions (#...#)
     'viewable_mime_types'    => env('APP_VIEWABLE_MIME_TYPES', ['image/.*', 'application/pdf', 'text/plain', 'text/x-diff', 'application/json', 'audio/.*']),
+    'non_viewable_mime_types'    => env('APP_NON_VIEWABLE_MIME_TYPES', ['image/svg.*']),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Allowed extensions and mime types for files uploaded by customers.
+    | Files with other extensions and mime types will be renamed.
+    |
+    | APP_CUSTOMER_UPLOADABLE_EXTENSIONS should contain comma separated list: jpg,jpeg,png,gif...
+    | Same for APP_CUSTOMER_UPLOADABLE_MIME_TYPES.
+    |-------------------------------------------------------------------------
+    */
+    'customer_allowed_extensions'    => env('APP_CUSTOMER_ALLOWED_EXTENSIONS') 
+                                ? explode(',', env('APP_CUSTOMER_ALLOWED_EXTENSIONS'))
+                                : ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'mp3', 'wav', 'ogg', 'wma', 'pdf', 'txt', 'csv', 'doc', 'docx', 'xls', 'xlsx'],
+
+    'customer_allowed_mime_types'    => env('APP_CUSTOMER_ALLOWED_MIME_TYPES') 
+                                ? explode(',', env('APP_CUSTOMER_ALLOWED_MIME_TYPES'))
+                                : ['image/jpg', 'image/jpeg', 'image/gif', 'image/bmp', 'image/x-ms-bmp', 'image/webp', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/x-ms-wma', 'application/pdf', 'text/plain', 'text/csv', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
 
     /*
     |--------------------------------------------------------------------------
@@ -426,7 +444,7 @@ return [
     // Need to be set for curl. Guzzle sends it's own user agent: GuzzleHttp/6.3.3 curl/7.58.0 PHP/8.2.5
     'curl_user_agent'      => env('APP_CURL_USER_AGENT', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 7_1_4) AppleWebKit/603.26 (KHTML, like Gecko) Chrome/55.0.3544.220 Safari/534'),
     // Should be set for curl and Guzzle.
-    'curl_ssl_verifypeer'  => env('APP_CURL_SSL_VERIFYPEER', false),
+    'curl_ssl_verifypeer'  => env('APP_CURL_SSL_VERIFYPEER', true),
 
     /*
     |--------------------------------------------------------------------------
@@ -489,10 +507,10 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Enable Content-Security-Policy meta tag to prevent possible XSS attacks.
+    | Content-Security-Policy meta tag parameters.
     |-------------------------------------------------------------------------
     */
-    'csp_enabled'    => env('APP_CSP_ENABLED', true),
+    //'csp_enabled'    => env('APP_CSP_ENABLED', true),
     'csp_script_src' => env('APP_CSP_SCRIPT_SRC', ''),
     'csp_custom'     => env('APP_CSP_CUSTOM', ''),
 
@@ -512,6 +530,33 @@ return [
     |-------------------------------------------------------------------------
     */
     'alternative_reply_separation'    => env('APP_ALTERNATIVE_REPLY_SEPARATION', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Comma separated list of white listed hosts.
+    | If some input containing URL becomes blank after saving it - add its host or IP here.
+    | Example: example.org,test.example.org,192.168.1.97
+    |-------------------------------------------------------------------------
+    */
+    'remote_host_white_list'    => env('APP_REMOTE_HOST_WHITE_LIST', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | By default only the host specified in APP_URL is allowed.
+    | To allow additional hosts list them separating by commas.
+    |--------------------------------------------------------------------------
+    */
+    'trusted_hosts' => env('APP_TRUSTED_HOSTS', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | If you get an error message saying that your browser doesn't support CSP,
+    | list your User-Agent in this parameter (https://www.whatismybrowser.com/detect/what-is-my-user-agent/).
+    | Use "|" symbol to separate multiple User-Agents.
+    | And don't forget to send your User-Agent to this issue: https://github.com/freescout-help-desk/freescout/issues/5331
+    |--------------------------------------------------------------------------
+    */
+    'allowed_user_agents' => env('APP_ALLOWED_USER_AGENTS', ''),
 
     /*
     |--------------------------------------------------------------------------

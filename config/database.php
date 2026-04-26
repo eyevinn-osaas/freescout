@@ -53,17 +53,19 @@ return [
             'strict'      => false,
             'engine'      => null,
             'options'     => extension_loaded('pdo_mysql') ? array_filter([
-                PDO::MYSQL_ATTR_SSL_CA => env('DB_MYSQL_ATTR_SSL_CA'),
-                PDO::MYSQL_ATTR_SSL_CERT => env('DB_MYSQL_ATTR_SSL_CERT'),
+                (defined('Pdo\Mysql::ATTR_SSL_CA') ? Pdo\Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('DB_MYSQL_ATTR_SSL_CA'),
+                (defined('Pdo\Mysql::ATTR_SSL_CERT') ? Pdo\Mysql::ATTR_SSL_CERT : PDO::MYSQL_ATTR_SSL_CERT) => env('DB_MYSQL_ATTR_SSL_CERT'),
+                // https://github.com/freescout-help-desk/freescout/issues/5273
+                (defined('Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT') ? Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT : (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT') ? PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT : -1)) => env('DB_MYSQL_ATTR_SSL_VERIFY_SERVER_CERT', true),
                 PDO::ATTR_PERSISTENT => env('DB_ATTR_PERSISTENT'),
-            ]) : [],
+            ], function($value) { return $value !== null; }) : [],
         ],
 
         'testing' => [
             'driver'         => 'mysql',
             //'url'            => env('DB_TEST_DATABASE_URL'),
-            'host'           => '127.0.0.1',
-            'database'       => 'freescout-test',
+            'host'           => env('DB_TEST_HOST', '127.0.0.1'),
+            'database'       => env('DB_TEST_DATABASE', 'freescout-test'),
             'username'       => env('DB_TEST_USERNAME', 'freescout-test'),
             'password'       => env('DB_TEST_PASSWORD', 'freescout-test'),
             //'port'           => env('DB_TEST_PORT', '3306'),
@@ -100,7 +102,7 @@ return [
             'schema'   => 'public',
             'sslmode'  => env('DB_PGSQL_SSLMODE', 'prefer'),
             'options'  => extension_loaded('pdo_pgsql') ? array_filter([
-                PDO::PGSQL_ATTR_DISABLE_PREPARES => env('DB_PGSQL_ATTR_DISABLE_PREPARES'),
+                (defined('Pdo\Pgsql::ATTR_DISABLE_PREPARES') ? Pdo\Pgsql::ATTR_DISABLE_PREPARES : PDO::PGSQL_ATTR_DISABLE_PREPARES) => env('DB_PGSQL_ATTR_DISABLE_PREPARES'),
                 PDO::ATTR_PERSISTENT => env('DB_ATTR_PERSISTENT'),
             ]) : [],
         ],
@@ -144,7 +146,7 @@ return [
 
     'redis' => [
 
-        'client' => 'predis',
+        'client' => env('REDIS_CLIENT', 'predis'),
 
         'default' => [
             'host'     => env('REDIS_HOST', '127.0.0.1'),

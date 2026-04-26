@@ -27,7 +27,7 @@ class OpenController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function userSetup($hash)
+    public function userSetup($hash, $invite_sent_at)
     {
         if (auth()->user()) {
             return redirect()->route('dashboard');
@@ -38,13 +38,17 @@ class OpenController extends Controller
             \Helper::setLocale($user->locale);
         }
 
+        if ($user && !$this->isInviteExpirationValid($invite_sent_at, $user)) {
+            $user = null;
+        }
+
         return view('open/user_setup', ['user' => $user]);
     }
 
     /**
      * Save user from invitation.
      */
-    public function userSetupSave($hash, Request $request)
+    public function userSetupSave($hash, $invite_sent_at, Request $request)
     {
         if (auth()->user()) {
             return redirect()->route('dashboard');
@@ -53,6 +57,10 @@ class OpenController extends Controller
 
         if (!$user) {
             abort(404);
+        }
+
+        if (!$this->isInviteExpirationValid($invite_sent_at, $user)) {
+            \Helper::denyAccess();
         }
 
         $validator = Validator::make($request->all(), [
@@ -114,6 +122,20 @@ class OpenController extends Controller
         return redirect()->route('dashboard');
     }
 
+    public function isInviteExpirationValid($invite_sent_at, $user)
+    {
+        $invite_sent_at = \Helper::decrypt($invite_sent_at, $user->password);
+
+        if (!$invite_sent_at 
+            || !is_numeric($invite_sent_at) 
+            || (int)$invite_sent_at < time() - User::INVITE_TTL_DAYS*86400
+        ) {
+            return false;
+        }
+
+        return true;
+    }
+
     /*
      * Set a thread as read by customer
      */
@@ -121,6 +143,10 @@ class OpenController extends Controller
     {
         $conversation = Conversation::findOrFail($conversation_id);
         $thread = Thread::findOrFail($thread_id);
+
+        if ((int)$thread->conversation_id !== (int)$conversation_id) {
+            return \Helper::denyAccess();
+        }
 
         // We only track the first opening
         if (empty($thread->opened_at)) {
@@ -167,8 +193,13 @@ class OpenController extends Controller
                 ->firstOrFail();
         }
 
+        // Check attachment name.
+        if (trim($attachment->file_name) != trim($file_name)) {
+            return \Helper::denyAccess();
+        }
+
         // Only allow download if the attachment is public or if the token matches the hash of the contents
-        if ($token != $attachment->getToken() && (bool)$attachment->public !== true) {
+        if ($token != $attachment->getToken() && $attachment->token_type != Attachment::TOKEN_TYPE_LEGACY) {
             return \Helper::denyAccess();
         }
 
@@ -184,9 +215,17 @@ class OpenController extends Controller
             $allowed_mime_type = false;
 
             foreach (config('app.viewable_mime_types') as $mime_type) {
-                if (preg_match('#'.$mime_type.'#', $attachment->mime_type)) {
+                if (preg_match('#^'.$mime_type.'$#', $attachment->mime_type)) {
                     $allowed_mime_type = true;
                     break;
+                }
+            }
+            if ($allowed_mime_type) {
+                foreach (config('app.non_viewable_mime_types') as $mime_type) {
+                    if (preg_match('#^'.$mime_type.'$#', $attachment->mime_type)) {
+                        $allowed_mime_type = false;
+                        break;
+                    }
                 }
             }
             if (!$allowed_mime_type) {
@@ -194,26 +233,41 @@ class OpenController extends Controller
             }
         }
 
+        // CSP header for exatra security.
+        $csp_header_value = "script-src 'none'; frame-src 'none'; object-src 'none'; font-src 'none'; connect-src 'none'; media-src 'self'; form-action 'none'; base-uri 'none'; sandbox";
+        // https://github.com/freescout-help-desk/freescout/issues/5281
+        if (preg_match('#^audio/.*$#', $attachment->mime_type)) {
+            $csp_header_value .= ' allow-scripts';
+        }
+
         if (config('app.download_attachments_via') == 'apache') {
             // Send using Apache mod_xsendfile.
             $response = response(null)
-               ->header('Content-Type' , $attachment->mime_type)
+               ->header('Content-Type', $attachment->mime_type)
                ->header('X-Sendfile', $attachment->getLocalFilePath());
 
             if (!$view_attachment) {
                 $response->header('Content-Disposition', 'attachment; filename="'.$attachment->file_name.'"');
+            } else {
+                $response->header('Content-Security-Policy', $csp_header_value);
             }
         } elseif (config('app.download_attachments_via') == 'nginx') {
             // Send using Nginx.
             $response = response(null)
-               ->header('Content-Type' , $attachment->mime_type)
+               ->header('Content-Type', $attachment->mime_type)
                ->header('X-Accel-Redirect', $attachment->getLocalFilePath(false));
                
             if (!$view_attachment) {
                 $response->header('Content-Disposition', 'attachment; filename="'.$attachment->file_name.'"');
+            } else {
+                $response->header('Content-Security-Policy', $csp_header_value);
             }
         } else {
-            $response = $attachment->download($view_attachment);
+            $headers = [];
+            if ($view_attachment) {
+                $headers['Content-Security-Policy'] = $csp_header_value;
+            }
+            $response = $attachment->download($view_attachment, $headers);
         }
 
         return $response;

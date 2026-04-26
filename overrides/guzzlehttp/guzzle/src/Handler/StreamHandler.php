@@ -320,9 +320,15 @@ class StreamHandler
         );
 
         return $this->createResource(
-            function () use ($uri, &$http_response_header, $context, $options) {
+            function () use ($uri, &$http_response_header_local, $context, $options) {
                 $resource = fopen((string) $uri, 'r', null, $context);
-                $this->lastHeaders = $http_response_header;
+
+                // See https://wiki.php.net/rfc/deprecations_php_8_5#deprecate_the_http_response_header_predefined_variable
+                if (function_exists('http_get_last_response_headers')) {
+                    $http_response_header = \http_get_last_response_headers();
+                }
+
+                $this->lastHeaders = $http_response_header ?? [];
 
                 if (isset($options['read_timeout'])) {
                     $readTimeout = $options['read_timeout'];
