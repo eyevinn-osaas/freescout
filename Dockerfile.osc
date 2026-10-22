@@ -1,6 +1,9 @@
-FROM tiredofit/freescout:latest
+# Upstream moved from tiredofit/freescout to nfrastack/freescout (2.x series,
+# Alpine + PHP 8.5). Pinned so PHP security updates are picked up deliberately.
+FROM nfrastack/freescout:2.2.21
 
-COPY ./osc-entrypoint.sh /usr/local/bin/osc-entrypoint.sh
-RUN chmod +x /usr/local/bin/osc-entrypoint.sh
+COPY --chmod=755 osc-entrypoint.sh /usr/local/bin/osc-entrypoint.sh
+
+EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/osc-entrypoint.sh"]
